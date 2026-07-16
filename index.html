@@ -252,7 +252,10 @@ async function carregarTelaAcesso() {
 }
 
 function entrarSistema() {
-  document.getElementById('telaAcesso').style.display = 'none';
+  // Remove do DOM (não só esconde): a classe .d-flex do Bootstrap usa
+  // display:flex !important, que vencia o style.display='none' e deixava
+  // a tela de login "vazando" por trás do sistema.
+  document.getElementById('telaAcesso').remove();
   document.getElementById('appPrincipal').style.display = '';
   inicializarApp();
 }
