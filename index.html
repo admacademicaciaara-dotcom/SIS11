@@ -178,13 +178,39 @@
 let CTX = null;          // contexto inicial (usuario, turmas, materias, ...)
 let turmaSel = '';       // ID_Turma selecionado no topo
 
-/* ---- helper: chama função do servidor como Promise ---- */
+/* ---- helper: chama função do servidor como Promise ----
+   Inclui timeout de segurança: se o Apps Script não responder em 30s
+   (trava no servidor, sessão expirada, etc.), destrava a tela em vez
+   de deixar o overlay de carregamento preso para sempre. */
 function gs(fn, ...args) {
   mostrarOverlay(true);
   return new Promise((res, rej) => {
+    let concluido = false;
+    const timeoutId = setTimeout(() => {
+      if (concluido) return;
+      concluido = true;
+      mostrarOverlay(false);
+      const erro = new Error(`Tempo esgotado ao chamar "${fn}" no servidor (30s). Veja o Console (F12) e o log de Execuções do Apps Script.`);
+      console.error(`[gs:${fn}] timeout`, args);
+      rej(erro);
+    }, 30000);
+
     google.script.run
-      .withSuccessHandler(v => { mostrarOverlay(false); res(v); })
-      .withFailureHandler(e => { mostrarOverlay(false); rej(e); })
+      .withSuccessHandler(v => {
+        if (concluido) return;
+        concluido = true;
+        clearTimeout(timeoutId);
+        mostrarOverlay(false);
+        res(v);
+      })
+      .withFailureHandler(e => {
+        if (concluido) return;
+        concluido = true;
+        clearTimeout(timeoutId);
+        mostrarOverlay(false);
+        console.error(`[gs:${fn}]`, e);
+        rej(e);
+      })
       [fn](...args);
   });
 }
@@ -235,45 +261,51 @@ function entrarSistema() {
    INICIALIZAÇÃO DO APP (executa uma vez, após "Entrar no Sistema")
 ============================================================= */
 async function inicializarApp() {
-  document.getElementById('badgeUsuario').textContent = `${CTX.usuario.nome} · ${CTX.usuario.funcao}`;
-
-  // Perfil Visualizacao não vê abas de escrita; só Admin vê ações de cadastro-base
-  if (CTX.usuario.funcao === 'Visualizacao') {
-    document.querySelectorAll('.escrita').forEach(e => e.style.display = 'none');
-  }
-  if (CTX.usuario.funcao !== 'Admin') {
-    document.querySelectorAll('.admin-only').forEach(e => e.style.display = 'none');
-  }
-
-  // Popular seletor de turmas (novas turmas na planilha aparecem sozinhas)
-  const sel = document.getElementById('selTurma');
-  CTX.turmas.forEach(t => {
-    const o = document.createElement('option');
-    o.value = t.idTurma;
-    o.textContent = `${t.idTurma} — ${t.status}`;
-    sel.appendChild(o);
-  });
-
-  // Listas fixas
-  preencherSelect('regTipo', CTX.tiposAtividade);
-  preencherSelect('regMet', CTX.metodologias);
-  preencherSelect('avaTipo', CTX.tiposAvaliacao);
-  document.getElementById('regData').value = CTX.hoje;
-  document.getElementById('avaData').value = CTX.hoje;
-
-  // Período padrão do relatório: semana corrente (seg→dom)
-  const hoje = new Date(CTX.hoje + 'T00:00:00');
-  const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
-  const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
-  document.getElementById('relDe').value = seg.toISOString().slice(0, 10);
-  document.getElementById('relAte').value = dom.toISOString().slice(0, 10);
-
-  // Liga as abas de cadastro (Cursos/Matérias/Instrutores) ao carregamento dinâmico
-  ligarAbasCrud();
-
+  // Toda a inicialização roda protegida: qualquer erro aqui (antes era só
+  // parcialmente protegido) agora sempre gera um toast visível em vez de
+  // travar a tela silenciosamente sem feedback nenhum.
   try {
-    aoTrocarTurma();
-  } catch (e) { toast('Erro ao carregar: ' + e.message, 'danger'); }
+    document.getElementById('badgeUsuario').textContent = `${CTX.usuario.nome} · ${CTX.usuario.funcao}`;
+
+    // Perfil Visualizacao não vê abas de escrita; só Admin vê ações de cadastro-base
+    if (CTX.usuario.funcao === 'Visualizacao') {
+      document.querySelectorAll('.escrita').forEach(e => e.style.display = 'none');
+    }
+    if (CTX.usuario.funcao !== 'Admin') {
+      document.querySelectorAll('.admin-only').forEach(e => e.style.display = 'none');
+    }
+
+    // Popular seletor de turmas (novas turmas na planilha aparecem sozinhas)
+    const sel = document.getElementById('selTurma');
+    CTX.turmas.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.idTurma;
+      o.textContent = `${t.idTurma} — ${t.status}`;
+      sel.appendChild(o);
+    });
+
+    // Listas fixas
+    preencherSelect('regTipo', CTX.tiposAtividade);
+    preencherSelect('regMet', CTX.metodologias);
+    preencherSelect('avaTipo', CTX.tiposAvaliacao);
+    document.getElementById('regData').value = CTX.hoje;
+    document.getElementById('avaData').value = CTX.hoje;
+
+    // Período padrão do relatório: semana corrente (seg→dom)
+    const hoje = new Date(CTX.hoje + 'T00:00:00');
+    const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
+    const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+    document.getElementById('relDe').value = seg.toISOString().slice(0, 10);
+    document.getElementById('relAte').value = dom.toISOString().slice(0, 10);
+
+    // Liga as abas de cadastro (Cursos/Matérias/Instrutores) ao carregamento dinâmico
+    ligarAbasCrud();
+
+    await aoTrocarTurma();
+  } catch (e) {
+    console.error('[inicializarApp]', e);
+    toast('Erro ao carregar o sistema: ' + e.message, 'danger');
+  }
 }
 
 function preencherSelect(id, itens, placeholder = 'Selecione…') {
