@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { background: #f4f6f9; }
+    .navbar-ciaara { background: #1F4E78; }
+    .card-kpi .fs-3 { font-weight: 700; }
+    .progress { height: 22px; }
+    .cursor-pointer { cursor: pointer; }
+    .table-sm td, .table-sm th { vertical-align: middle; }
+    #overlay { position: fixed; inset: 0; background: rgba(255,255,255,.65); display: none; z-index: 2000; align-items: center; justify-content: center; }
+    /* Impressão: mostra só a área do relatório */
+    @media print {
+      body * { visibility: hidden; }
+      #areaImpressao, #areaImpressao * { visibility: visible; }
+      #areaImpressao { position: absolute; left: 0; top: 0; width: 100%; }
+      .no-print { display: none !important; }
+    }
+    .print-header { text-align: center; margin-bottom: 12px; }
+    .print-header h6 { margin: 0; font-weight: 700; }
+  </style>
+</head>
+<body>
+
+<!-- ===================== NAVBAR ===================== -->
+<nav class="navbar navbar-dark navbar-ciaara navbar-expand-lg px-3 no-print">
+  <span class="navbar-brand fw-bold">⚓ CIAARA-11 · Gestão Acadêmica</span>
+  <div class="d-flex align-items-center ms-auto gap-3 flex-wrap">
+    <select id="selTurma" class="form-select form-select-sm" style="min-width:280px" onchange="aoTrocarTurma()">
+      <option value="">— Panorama Geral (todas as turmas) —</option>
+    </select>
+    <span class="badge bg-light text-dark" id="badgeUsuario">…</span>
+  </div>
+</nav>
+
+<!-- ===================== TABS ===================== -->
+<div class="container-fluid mt-3">
+  <ul class="nav nav-tabs no-print" id="abas">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDash">📊 Dashboard</button></li>
+    <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabReg">📝 Registrar Aula</button></li>
+    <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAva">🗓️ Avaliações</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRel">🖨️ Relatório</button></li>
+  </ul>
+
+  <div class="tab-content bg-white border border-top-0 p-3 rounded-bottom">
+
+    <!-- ============ DASHBOARD ============ -->
+    <div class="tab-pane fade show active" id="tabDash">
+      <div id="dashGeral"></div>
+      <div id="dashTurma" style="display:none"></div>
+    </div>
+
+    <!-- ============ REGISTRAR AULA ============ -->
+    <div class="tab-pane fade" id="tabReg">
+      <div class="alert alert-info py-2" id="avisoTurmaReg" style="display:none">Selecione uma turma no menu superior para registrar.</div>
+      <div class="row g-3" id="formReg">
+        <div class="col-md-2"><label class="form-label">Data*</label><input type="date" id="regData" class="form-control"></div>
+        <div class="col-md-4"><label class="form-label">Matéria*</label><select id="regMateria" class="form-select" onchange="filtrarInstrutores()"></select></div>
+        <div class="col-md-6"><label class="form-label">Instrutor*</label><select id="regInstrutor" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Tipo de Atividade*</label><select id="regTipo" class="form-select" onchange="aoTrocarTipo()"></select></div>
+        <div class="col-md-3"><label class="form-label">Metodologia*</label><select id="regMet" class="form-select"></select></div>
+        <div class="col-md-2"><label class="form-label">Tempos*</label><input type="number" id="regTempos" class="form-control" min="1" value="1"></div>
+        <div class="col-md-4"><label class="form-label">Saldo da matéria</label><input id="regSaldo" class="form-control" disabled placeholder="—"></div>
+        <div class="col-md-8"><label class="form-label">Conteúdo / Resumo</label><input id="regConteudo" class="form-control" placeholder="Ex: Introdução a marés — teoria e exercícios"></div>
+        <div class="col-md-4"><label class="form-label">Observações</label><input id="regObs" class="form-control"></div>
+        <div class="col-12"><button class="btn btn-primary" onclick="salvarRegistro()">Salvar registro</button></div>
+      </div>
+    </div>
+
+    <!-- ============ AVALIAÇÕES ============ -->
+    <div class="tab-pane fade" id="tabAva">
+      <div class="alert alert-info py-2" id="avisoTurmaAva" style="display:none">Selecione uma turma no menu superior.</div>
+      <div id="blocoAva">
+        <div class="row g-3 mb-3">
+          <div class="col-md-4"><label class="form-label">Matéria*</label><select id="avaMateria" class="form-select" onchange="preencherInstrutores('avaInstrutor', this.value)"></select></div>
+          <div class="col-md-2"><label class="form-label">Tipo*</label><select id="avaTipo" class="form-select"></select></div>
+          <div class="col-md-2"><label class="form-label">Data da avaliação*</label><input type="date" id="avaData" class="form-control"></div>
+          <div class="col-md-2"><label class="form-label">Vista de prova</label><input type="date" id="avaVista" class="form-control"></div>
+          <div class="col-md-2"><label class="form-label">Instrutor responsável</label><select id="avaInstrutor" class="form-select"></select></div>
+          <div class="col-12"><button class="btn btn-primary" onclick="salvarAvaliacao()">Agendar avaliação</button></div>
+        </div>
+        <h6>Avaliações da turma</h6>
+        <div id="tabelaAva"></div>
+      </div>
+    </div>
+
+    <!-- ============ RELATÓRIO ============ -->
+    <div class="tab-pane fade" id="tabRel">
+      <div class="row g-2 align-items-end no-print">
+        <div class="col-auto"><label class="form-label">De</label><input type="date" id="relDe" class="form-control"></div>
+        <div class="col-auto"><label class="form-label">Até</label><input type="date" id="relAte" class="form-control"></div>
+        <div class="col-auto"><button class="btn btn-primary" onclick="gerarRelatorio()">Gerar</button></div>
+        <div class="col-auto"><button class="btn btn-outline-secondary" onclick="window.print()">🖨️ Imprimir</button></div>
+      </div>
+      <hr class="no-print">
+      <div id="areaImpressao"><p class="text-muted">Selecione a turma e o período, depois clique em Gerar.</p></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast + Overlay -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
+<div id="overlay"><div class="spinner-border text-primary" style="width:3.5rem;height:3.5rem"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+/* =============================================================
+   ESTADO GLOBAL
+============================================================= */
+let CTX = null;          // contexto inicial (usuario, turmas, materias, ...)
+let turmaSel = '';       // ID_Turma selecionado no topo
+
+/* ---- helper: chama função do servidor como Promise ---- */
+function gs(fn, ...args) {
+  mostrarOverlay(true);
+  return new Promise((res, rej) => {
+    google.script.run
+      .withSuccessHandler(v => { mostrarOverlay(false); res(v); })
+      .withFailureHandler(e => { mostrarOverlay(false); rej(e); })
+      [fn](...args);
+  });
+}
+function mostrarOverlay(on) { document.getElementById('overlay').style.display = on ? 'flex' : 'none'; }
+function toast(msg, tipo = 'success') {
+  const el = document.createElement('div');
+  el.className = `toast align-items-center text-bg-${tipo} border-0 show`;
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${msg}</div>
+    <button class="btn-close btn-close-white me-2 m-auto" onclick="this.closest('.toast').remove()"></button></div>`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 6000);
+}
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtBR(iso) { if (!iso) return ''; const [a,m,d] = String(iso).split('-'); return d && a ? `${d}/${m}/${a}` : iso; }
+
+/* =============================================================
+   INICIALIZAÇÃO
+============================================================= */
+window.addEventListener('load', async () => {
+  try {
+    CTX = await gs('getContextoInicial');
+    document.getElementById('badgeUsuario').textContent = `${CTX.usuario.nome} · ${CTX.usuario.funcao}`;
+
+    // Perfil Visualizacao não vê abas de escrita
+    if (CTX.usuario.funcao === 'Visualizacao') {
+      document.querySelectorAll('.escrita').forEach(e => e.style.display = 'none');
+    }
+
+    // Popular seletor de turmas (novas turmas na planilha aparecem sozinhas)
+    const sel = document.getElementById('selTurma');
+    CTX.turmas.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.idTurma;
+      o.textContent = `${t.idTurma} — ${t.status}`;
+      sel.appendChild(o);
+    });
+
+    // Listas fixas
+    preencherSelect('regTipo', CTX.tiposAtividade);
+    preencherSelect('regMet', CTX.metodologias);
+    preencherSelect('avaTipo', CTX.tiposAvaliacao);
+    document.getElementById('regData').value = CTX.hoje;
+    document.getElementById('avaData').value = CTX.hoje;
+
+    // Período padrão do relatório: semana corrente (seg→dom)
+    const hoje = new Date(CTX.hoje + 'T00:00:00');
+    const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
+    const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+    document.getElementById('relDe').value = seg.toISOString().slice(0, 10);
+    document.getElementById('relAte').value = dom.toISOString().slice(0, 10);
+
+    aoTrocarTurma();
+  } catch (e) { toast('Erro ao carregar: ' + e.message, 'danger'); }
+});
+
+function preencherSelect(id, itens, placeholder = 'Selecione…') {
+  const s = document.getElementById(id);
+  s.innerHTML = `<option value="">${placeholder}</option>` + itens.map(i => `<option>${esc(i)}</option>`).join('');
+}
+
+/* =============================================================
+   TROCA DE TURMA (filtro global)
+============================================================= */
+async function aoTrocarTurma() {
+  turmaSel = document.getElementById('selTurma').value;
+  const temTurma = !!turmaSel;
+
+  document.getElementById('avisoTurmaReg').style.display = temTurma ? 'none' : '';
+  document.getElementById('formReg').style.display = temTurma ? '' : 'none';
+  document.getElementById('avisoTurmaAva').style.display = temTurma ? 'none' : '';
+  document.getElementById('blocoAva').style.display = temTurma ? '' : 'none';
+
+  if (temTurma) {
+    // Matérias da turma (filtradas pelo curso) — expansível sem código
+    const turma = CTX.turmas.find(t => t.idTurma === turmaSel);
+    const mats = CTX.materias.filter(m => m.idCurso === turma.idCurso);
+    const opts = mats.map(m => `<option value="${esc(m.idGrade)}">${esc(m.nome)} (${m.cargaHoraria}t)</option>`).join('');
+    document.getElementById('regMateria').innerHTML = '<option value="">Selecione…</option>' + opts;
+    document.getElementById('avaMateria').innerHTML = '<option value="">Selecione…</option>' + opts;
+    filtrarInstrutores();
+    preencherInstrutores('avaInstrutor', null);
+    carregarDashboardTurma();
+    carregarAvaliacoes();
+  } else {
+    carregarDashboardGeral();
+  }
+}
+
+/* Instrutores: prioriza habilitados (Instrutor_Materia) para a matéria escolhida */
+function filtrarInstrutores() {
+  preencherInstrutores('regInstrutor', document.getElementById('regMateria').value);
+  atualizarSaldoMateria();
+}
+/* ALTERADO: filtro agora é ESTRITO (só habilitados), Contexto V1 regra 1.
+   Sem matéria selecionada (ex.: tipos sem matéria), mostra todos — nada a filtrar ainda. */
+function preencherInstrutores(selectId, idGrade) {
+  const s = document.getElementById(selectId);
+  const todos = CTX.instrutores;
+  if (!idGrade) {
+    s.innerHTML = '<option value="">Selecione…</option>' +
+      todos.map(i => `<option value="${i.id}">${esc(i.pg)} ${esc(i.nome)}</option>`).join('');
+    return;
+  }
+  const habilitadosIds = new Set(CTX.vinculos.filter(v => v.idGrade === idGrade).map(v => v.idInstrutor));
+  const habilitados = todos.filter(i => habilitadosIds.has(i.id));
+  s.innerHTML = habilitados.length
+    ? '<option value="">Selecione…</option>' + habilitados.map(i => `<option value="${i.id}">${esc(i.pg)} ${esc(i.nome)}</option>`).join('')
+    : '<option value="">⚠️ Nenhum instrutor habilitado nesta matéria</option>';
+}
+async function atualizarSaldoMateria() {
+  const idGrade = document.getElementById('regMateria').value;
+  const campo = document.getElementById('regSaldo');
+  campo.value = '';
+  if (!idGrade || !turmaSel) return;
+  // Saldo local (rápido): prevista da matéria − consumido virá do dashboard já carregado
+  const m = CTX.materias.find(x => x.idGrade === idGrade);
+  if (m && window._dashTurma) {
+    const linha = window._dashTurma.materias.find(l => l.idGrade === idGrade);
+    if (linha) campo.value = `${linha.consumida} de ${linha.prevista} tempos usados · saldo ${linha.saldo}`;
+  }
+}
+function aoTrocarTipo() {
+  const tipo = document.getElementById('regTipo').value;
+  const semMateria = CTX.tiposSemMateria.includes(tipo);
+  document.getElementById('regMateria').disabled = semMateria;
+  if (semMateria) document.getElementById('regMateria').value = '';
+}
+
+/* =============================================================
+   DASHBOARDS
+============================================================= */
+async function carregarDashboardGeral() {
+  document.getElementById('dashTurma').style.display = 'none';
+  const box = document.getElementById('dashGeral');
+  box.style.display = '';
+  try {
+    const dados = await gs('getDashboardGeral');
+    box.innerHTML = '<h5 class="mb-3">Panorama Geral — CIAARA</h5><div class="row g-3">' +
+      dados.map(t => {
+        const cor = t.atrasada ? 'danger' : (t.pct >= 100 ? 'success' : 'primary');
+        const badgeStatus = {'Ativa':'success','Planejada':'secondary','Concluida':'dark','Concluída':'dark','Cancelada':'danger'}[t.status] || 'secondary';
+        return `<div class="col-md-6 col-xl-4">
+          <div class="card h-100 shadow-sm cursor-pointer" onclick="selecionarTurma('${esc(t.idTurma)}')">
+            <div class="card-body">
+              <div class="d-flex justify-content-between">
+                <b>${esc(t.idTurma)}</b>
+                <span class="badge bg-${badgeStatus}">${esc(t.status)}</span>
+              </div>
+              <small class="text-muted d-block mb-2">${esc(t.nome || '')}</small>
+              <div class="progress mb-1"><div class="progress-bar bg-${cor}" style="width:${Math.min(t.pct,100)}%">${t.pct}%</div></div>
+              <small>${t.consumida} / ${t.prevista} tempos ministrados${t.extras ? ` · +${t.extras} extras` : ''}</small><br>
+              ${t.status === 'Ativa'
+                ? (t.atrasada
+                    ? `<span class="badge bg-danger mt-1">⚠️ Curso atrasado (faltam ${t.prevista - t.consumida} tempos p/ ${t.capacidadeRestante} disponíveis)</span>`
+                    : `<span class="badge bg-success-subtle text-success mt-1">Gordura: ${t.gordura} tempos</span>`)
+                : ''}
+            </div></div></div>`;
+      }).join('') + '</div>';
+  } catch (e) { toast(e.message, 'danger'); }
+}
+function selecionarTurma(id) {
+  document.getElementById('selTurma').value = id;
+  aoTrocarTurma();
+}
+
+async function carregarDashboardTurma() {
+  document.getElementById('dashGeral').style.display = 'none';
+  const box = document.getElementById('dashTurma');
+  box.style.display = '';
+  try {
+    const d = await gs('getDashboardTurma', turmaSel);
+    window._dashTurma = d;
+    const r = d.resumo;
+    const alerta = r.atrasada
+      ? `<div class="alert alert-danger py-2">⚠️ <b>Curso atrasado:</b> restam <b>${r.restante}</b> tempos e só <b>${r.capacidadeRestante}</b> cabem até ${fmtBR(d.turma.dataTermino)} (${r.diasUteisRestantes} dias úteis × ${d.turma.temposPorDia} tempos/dia).</div>`
+      : (d.turma.status === 'Ativa' ? `<div class="alert alert-success py-2">✅ <b>Gordura operacional:</b> ${r.gordura} tempos (~${r.gorduraDias} dias úteis de folga).</div>` : '');
+
+    const kpi = (t, v) => `<div class="col"><div class="card card-kpi text-center"><div class="card-body py-2"><div class="fs-3">${v}</div><small class="text-muted">${t}</small></div></div></div>`;
+
+    box.innerHTML = `
+      <h5>${esc(d.turma.idTurma)} <span class="badge bg-secondary">${esc(d.turma.status)}</span></h5>
+      <small class="text-muted">${esc(d.turma.nome || '')} · ${fmtBR(d.turma.dataInicio)} a ${fmtBR(d.turma.dataTermino)}</small>
+      <div class="row g-2 my-2">
+        ${kpi('CH prevista', r.prevista)} ${kpi('Ministrada', r.consumida)} ${kpi('Restante', r.restante)}
+        ${kpi('% concluído', r.pct + '%')} ${kpi('Dias úteis rest.', r.diasUteisRestantes)} ${kpi('Capacidade rest.', r.capacidadeRestante)}
+      </div>
+      ${alerta}
+      <table class="table table-sm table-hover align-middle">
+        <thead class="table-light"><tr><th>Matéria</th><th style="width:110px">CH Prev.</th><th style="width:110px">Ministrada</th><th style="width:100px">Saldo</th><th style="width:26%">Progresso</th><th>Status</th></tr></thead>
+        <tbody>${d.materias.map(m => {
+          const cor = m.status === 'Excedida' ? 'warning' : (m.pct >= 100 ? 'success' : 'primary');
+          return `<tr><td>${esc(m.nome)}<br><small class="text-muted">${esc(m.idGrade)}</small></td>
+            <td>${m.prevista}</td><td>${m.consumida}</td><td>${m.saldo}</td>
+            <td><div class="progress"><div class="progress-bar bg-${cor}" style="width:${Math.min(m.pct,100)}%">${m.pct}%</div></div></td>
+            <td><span class="badge ${{'Não iniciada':'bg-secondary','Em andamento':'bg-primary','Concluída':'bg-success','Excedida':'bg-warning text-dark'}[m.status]}">${m.status}</span></td></tr>`;
+        }).join('')}</tbody></table>`;
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* =============================================================
+   REGISTRAR AULA
+============================================================= */
+async function salvarRegistro() {
+  try {
+    const p = {
+      idTurma: turmaSel,
+      data: document.getElementById('regData').value,
+      idGrade: document.getElementById('regMateria').value,
+      idInstrutor: document.getElementById('regInstrutor').value,
+      tipoAtividade: document.getElementById('regTipo').value,
+      metodologia: document.getElementById('regMet').value,
+      tempos: document.getElementById('regTempos').value,
+      conteudo: document.getElementById('regConteudo').value,
+      observacoes: document.getElementById('regObs').value
+    };
+    const r = await gs('registrarAula', p);
+    let msg = `Registro ${r.id} salvo!`;
+    if (r.saldo) msg += ` Saldo da matéria: ${r.saldo.saldo} tempos.`;
+    toast(msg);
+    document.getElementById('regConteudo').value = '';
+    document.getElementById('regObs').value = '';
+    carregarDashboardTurma(); // atualiza saldos
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* =============================================================
+   AVALIAÇÕES
+============================================================= */
+async function salvarAvaliacao() {
+  try {
+    const obj = {
+      'ID_Turma': turmaSel,
+      'ID_Grade': document.getElementById('avaMateria').value,
+      'Tipo_Avaliacao': document.getElementById('avaTipo').value,
+      'Data_Avaliacao': document.getElementById('avaData').value,
+      'Data_Vista_Prova': document.getElementById('avaVista').value,
+      'ID_Instrutor_Responsavel': document.getElementById('avaInstrutor').value,
+      'Status': 'Planejada',
+      'Observacoes': ''
+    };
+    if (!obj['ID_Grade'] || !obj['Tipo_Avaliacao'] || !obj['Data_Avaliacao']) {
+      return toast('Preencha matéria, tipo e data da avaliação.', 'warning');
+    }
+    await gs('registrarAvaliacao', obj);
+    toast('Avaliação agendada!');
+    carregarAvaliacoes();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function carregarAvaliacoes() {
+  try {
+    const todas = await gs('crudListar', 'Avaliacoes');
+    const doCursoSel = todas.filter(a => a['ID_Turma'] === turmaSel);
+    const mapMat = Object.fromEntries(CTX.materias.map(m => [m.idGrade, m.nome]));
+    const podeEditar = CTX.usuario.funcao !== 'Visualizacao';
+    document.getElementById('tabelaAva').innerHTML = doCursoSel.length === 0
+      ? '<p class="text-muted">Nenhuma avaliação cadastrada para esta turma.</p>'
+      : `<table class="table table-sm table-striped align-middle">
+          <thead class="table-light"><tr><th>ID</th><th>Matéria</th><th>Tipo</th><th>Data</th><th>Vista</th><th>Status</th>${podeEditar ? '<th></th>' : ''}</tr></thead>
+          <tbody>${doCursoSel.map(a => `<tr>
+            <td>${esc(a['ID_Avaliacao'])}</td>
+            <td>${esc(mapMat[a['ID_Grade']] || a['ID_Grade'])}</td>
+            <td>${esc(a['Tipo_Avaliacao'])}</td>
+            <td>${fmtBR(a['Data_Avaliacao'])}</td>
+            <td>${fmtBR(a['Data_Vista_Prova'])}</td>
+            <td>${podeEditar
+              ? `<select class="form-select form-select-sm" onchange="mudarStatusAva('${esc(a['ID_Avaliacao'])}', this.value)">
+                  ${CTX.statusAvaliacao.map(s => `<option ${s === a['Status'] ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>`
+              : esc(a['Status'])}</td>
+            ${podeEditar ? `<td><button class="btn btn-sm btn-outline-danger" onclick="excluirAva('${esc(a['ID_Avaliacao'])}')">🗑</button></td>` : ''}
+          </tr>`).join('')}</tbody></table>`;
+  } catch (e) { toast(e.message, 'danger'); }
+}
+async function mudarStatusAva(id, status) {
+  try { await gs('crudAtualizar', 'Avaliacoes', id, { 'Status': status }); toast('Status atualizado.'); }
+  catch (e) { toast(e.message, 'danger'); carregarAvaliacoes(); }
+}
+async function excluirAva(id) {
+  if (!confirm('Excluir a avaliação ' + id + '?')) return;
+  try { await gs('crudExcluir', 'Avaliacoes', id); toast('Avaliação excluída.'); carregarAvaliacoes(); }
+  catch (e) { toast(e.message, 'danger'); }
+}
+
+/* =============================================================
+   RELATÓRIO / IMPRESSÃO
+============================================================= */
+async function gerarRelatorio() {
+  if (!turmaSel) return toast('Selecione uma turma no menu superior.', 'warning');
+  try {
+    const r = await gs('getRelatorio', turmaSel, document.getElementById('relDe').value, document.getElementById('relAte').value);
+    document.getElementById('areaImpressao').innerHTML = `
+      <div class="print-header">
+        <h6>MARINHA DO BRASIL</h6>
+        <h6>CENTRO DE INSTRUÇÃO E ADESTRAMENTO ALMIRANTE RADLER DE AQUINO</h6>
+        <h6>DETALHE DE EXECUÇÃO — ${esc(r.turma.idTurma)}</h6>
+        <small>${esc(r.turma.nome || '')} · Período do curso: ${esc(r.turma.periodo)}<br>
+        Filtro: ${fmtBR(r.filtro.de) || 'início'} a ${fmtBR(r.filtro.ate) || 'fim'}</small>
+      </div>
+      <table class="table table-bordered table-sm">
+        <thead class="table-light"><tr>
+          <th>Data</th><th>Matéria</th><th>Instrutor</th><th>Tipo</th><th>Metodologia</th><th>Tempos</th><th>Conteúdo</th><th>Obs.</th>
+        </tr></thead>
+        <tbody>${r.linhas.length === 0
+          ? '<tr><td colspan="8" class="text-center text-muted">Nenhum registro no período.</td></tr>'
+          : r.linhas.map(l => `<tr>
+              <td>${fmtBR(l.data)}</td><td>${esc(l.materia)}</td><td>${esc(l.instrutor)}</td>
+              <td>${esc(l.tipo)}</td><td>${esc(l.metodologia)}</td><td class="text-center">${l.tempos}</td>
+              <td>${esc(l.conteudo)}</td><td>${esc(l.obs)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr class="table-light"><th colspan="5" class="text-end">Total de tempos no período:</th><th class="text-center">${r.totalTempos}</th><th colspan="2"></th></tr></tfoot>
+      </table>
+      <div class="d-flex justify-content-between mt-4">
+        <small>Gerado em ${r.geradoEm} por ${esc(r.geradoPor)}</small>
+        <div style="text-align:center">_______________________________<br><small>Encarregado da Divisão de Ensino</small></div>
+      </div>`;
+  } catch (e) { toast(e.message, 'danger'); }
+}
+</script>
+</body>
+</html>
