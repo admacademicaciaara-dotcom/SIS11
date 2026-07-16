@@ -25,6 +25,19 @@
 </head>
 <body>
 
+<!-- ===================== TELA DE ACESSO (GATEKEEPER) ===================== -->
+<div id="telaAcesso" class="d-flex align-items-center justify-content-center" style="min-height:100vh">
+  <div class="card shadow-sm" style="width:100%;max-width:420px">
+    <div class="card-body text-center p-4" id="telaAcessoConteudo">
+      <div class="spinner-border text-primary mb-3" role="status"></div>
+      <p class="text-muted mb-0">Verificando suas credenciais…</p>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== APP PRINCIPAL (oculto até "Entrar no Sistema") ===================== -->
+<div id="appPrincipal" style="display:none">
+
 <!-- ===================== NAVBAR ===================== -->
 <nav class="navbar navbar-dark navbar-ciaara navbar-expand-lg px-3 no-print">
   <span class="navbar-brand fw-bold">⚓ CIAARA-11 · Gestão Acadêmica</span>
@@ -43,6 +56,9 @@
     <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabReg">📝 Registrar Aula</button></li>
     <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAva">🗓️ Avaliações</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRel">🖨️ Relatório</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCursos">🎓 Cursos</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabMaterias">📚 Matérias</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabInstrutores">👤 Instrutores</button></li>
   </ul>
 
   <div class="tab-content bg-white border border-top-0 p-3 rounded-bottom">
@@ -99,12 +115,60 @@
       <div id="areaImpressao"><p class="text-muted">Selecione a turma e o período, depois clique em Gerar.</p></div>
     </div>
 
+    <!-- ============ CURSOS ============ -->
+    <div class="tab-pane fade" id="tabCursos">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Catálogo de Cursos</h5>
+        <button class="btn btn-primary btn-sm admin-only" onclick="abrirModalCrud('Cad_Cursos')">+ Novo Curso</button>
+      </div>
+      <div class="table-responsive"><table class="table table-sm table-striped align-middle" id="tblCursos"></table></div>
+    </div>
+
+    <!-- ============ MATÉRIAS ============ -->
+    <div class="tab-pane fade" id="tabMaterias">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Grade Curricular (Matérias)</h5>
+        <button class="btn btn-primary btn-sm admin-only" onclick="abrirModalCrud('Cad_Matérias')">+ Nova Matéria</button>
+      </div>
+      <div class="table-responsive"><table class="table table-sm table-striped align-middle" id="tblMaterias"></table></div>
+    </div>
+
+    <!-- ============ INSTRUTORES ============ -->
+    <div class="tab-pane fade" id="tabInstrutores">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Corpo Docente</h5>
+        <button class="btn btn-primary btn-sm admin-only" onclick="abrirModalCrud('Cad_Instrutor')">+ Novo Instrutor</button>
+      </div>
+      <div class="table-responsive"><table class="table table-sm table-striped align-middle" id="tblInstrutores"></table></div>
+    </div>
+
   </div>
 </div>
+
+</div><!-- /#appPrincipal -->
 
 <!-- Toast + Overlay -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toasts"></div>
 <div id="overlay"><div class="spinner-border text-primary" style="width:3.5rem;height:3.5rem"></div></div>
+
+<!-- MODAL GENÉRICO DE CADASTRO (Cursos / Matérias / Instrutores) -->
+<div class="modal fade" id="modalCrud" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="modalCrudTitulo">Novo registro</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="modalCrudCampos" class="row g-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="salvarCrud()">Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -137,44 +201,80 @@ function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;',
 function fmtBR(iso) { if (!iso) return ''; const [a,m,d] = String(iso).split('-'); return d && a ? `${d}/${m}/${a}` : iso; }
 
 /* =============================================================
-   INICIALIZAÇÃO
+   GATEKEEPER — TELA DE ACESSO
+   O back-end já valida o e-mail (doGet + getContextoInicial/exigirFuncao);
+   aqui só decidimos o que mostrar com base no resultado dessa chamada.
 ============================================================= */
-window.addEventListener('load', async () => {
+window.addEventListener('load', carregarTelaAcesso);
+
+async function carregarTelaAcesso() {
+  const cont = document.getElementById('telaAcessoConteudo');
   try {
     CTX = await gs('getContextoInicial');
-    document.getElementById('badgeUsuario').textContent = `${CTX.usuario.nome} · ${CTX.usuario.funcao}`;
+    cont.innerHTML = `
+      <div class="mb-2" style="font-size:2.5rem">⚓</div>
+      <h5 class="fw-bold mb-1">CIAARA-11 · Gestão Acadêmica</h5>
+      <p class="text-muted mb-1">Bem-vindo(a),</p>
+      <p class="mb-3"><b>${esc(CTX.usuario.nome)}</b><br><span class="badge bg-primary mt-1">${esc(CTX.usuario.funcao)}</span></p>
+      <button class="btn btn-primary w-100" onclick="entrarSistema()">Entrar no Sistema</button>`;
+  } catch (e) {
+    cont.innerHTML = `
+      <div class="mb-2 text-danger" style="font-size:2.5rem">🚫</div>
+      <h5 class="fw-bold text-danger mb-2">Acesso Negado</h5>
+      <p class="text-muted mb-0">${esc(e.message)}</p>`;
+  }
+}
 
-    // Perfil Visualizacao não vê abas de escrita
-    if (CTX.usuario.funcao === 'Visualizacao') {
-      document.querySelectorAll('.escrita').forEach(e => e.style.display = 'none');
-    }
+function entrarSistema() {
+  document.getElementById('telaAcesso').style.display = 'none';
+  document.getElementById('appPrincipal').style.display = '';
+  inicializarApp();
+}
 
-    // Popular seletor de turmas (novas turmas na planilha aparecem sozinhas)
-    const sel = document.getElementById('selTurma');
-    CTX.turmas.forEach(t => {
-      const o = document.createElement('option');
-      o.value = t.idTurma;
-      o.textContent = `${t.idTurma} — ${t.status}`;
-      sel.appendChild(o);
-    });
+/* =============================================================
+   INICIALIZAÇÃO DO APP (executa uma vez, após "Entrar no Sistema")
+============================================================= */
+async function inicializarApp() {
+  document.getElementById('badgeUsuario').textContent = `${CTX.usuario.nome} · ${CTX.usuario.funcao}`;
 
-    // Listas fixas
-    preencherSelect('regTipo', CTX.tiposAtividade);
-    preencherSelect('regMet', CTX.metodologias);
-    preencherSelect('avaTipo', CTX.tiposAvaliacao);
-    document.getElementById('regData').value = CTX.hoje;
-    document.getElementById('avaData').value = CTX.hoje;
+  // Perfil Visualizacao não vê abas de escrita; só Admin vê ações de cadastro-base
+  if (CTX.usuario.funcao === 'Visualizacao') {
+    document.querySelectorAll('.escrita').forEach(e => e.style.display = 'none');
+  }
+  if (CTX.usuario.funcao !== 'Admin') {
+    document.querySelectorAll('.admin-only').forEach(e => e.style.display = 'none');
+  }
 
-    // Período padrão do relatório: semana corrente (seg→dom)
-    const hoje = new Date(CTX.hoje + 'T00:00:00');
-    const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
-    const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
-    document.getElementById('relDe').value = seg.toISOString().slice(0, 10);
-    document.getElementById('relAte').value = dom.toISOString().slice(0, 10);
+  // Popular seletor de turmas (novas turmas na planilha aparecem sozinhas)
+  const sel = document.getElementById('selTurma');
+  CTX.turmas.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.idTurma;
+    o.textContent = `${t.idTurma} — ${t.status}`;
+    sel.appendChild(o);
+  });
 
+  // Listas fixas
+  preencherSelect('regTipo', CTX.tiposAtividade);
+  preencherSelect('regMet', CTX.metodologias);
+  preencherSelect('avaTipo', CTX.tiposAvaliacao);
+  document.getElementById('regData').value = CTX.hoje;
+  document.getElementById('avaData').value = CTX.hoje;
+
+  // Período padrão do relatório: semana corrente (seg→dom)
+  const hoje = new Date(CTX.hoje + 'T00:00:00');
+  const seg = new Date(hoje); seg.setDate(hoje.getDate() - ((hoje.getDay() + 6) % 7));
+  const dom = new Date(seg); dom.setDate(seg.getDate() + 6);
+  document.getElementById('relDe').value = seg.toISOString().slice(0, 10);
+  document.getElementById('relAte').value = dom.toISOString().slice(0, 10);
+
+  // Liga as abas de cadastro (Cursos/Matérias/Instrutores) ao carregamento dinâmico
+  ligarAbasCrud();
+
+  try {
     aoTrocarTurma();
   } catch (e) { toast('Erro ao carregar: ' + e.message, 'danger'); }
-});
+}
 
 function preencherSelect(id, itens, placeholder = 'Selecione…') {
   const s = document.getElementById(id);
@@ -435,6 +535,133 @@ async function gerarRelatorio() {
         <small>Gerado em ${r.geradoEm} por ${esc(r.geradoPor)}</small>
         <div style="text-align:center">_______________________________<br><small>Encarregado da Divisão de Ensino</small></div>
       </div>`;
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* =============================================================
+   ABAS DE CADASTRO (CRUD) — Cursos / Matérias / Instrutores
+   Módulo genérico: reaproveita 100% de crudListar/crudCriar/
+   crudAtualizar/crudExcluir já existentes no Código.gs.
+   As colunas do formulário/tabela são lidas dos dados reais da
+   planilha (Object.keys do primeiro registro); camposFallback só
+   entra em ação se a aba estiver 100% vazia na primeira vez.
+============================================================= */
+const CRUD_UI = {
+  'Cad_Cursos':    { tabelaId: 'tblCursos',      tabTarget: '#tabCursos',      camposFallback: ['ID_Curso', 'Nome_Curso'] },
+  'Cad_Matérias':  { tabelaId: 'tblMaterias',    tabTarget: '#tabMaterias',    camposFallback: ['ID_Grade', 'ID_Curso', 'Cod', 'Nome_Materia', 'Carga_Horaria'] },
+  'Cad_Instrutor': { tabelaId: 'tblInstrutores', tabTarget: '#tabInstrutores', camposFallback: ['ID_Instrutor', 'P/G', 'NOME'] }
+};
+let modalCrud = null;
+let crudSel = null; // { nomeAba, idColuna, idValor }
+
+function ligarAbasCrud() {
+  document.querySelectorAll('#abas [data-bs-target]').forEach(btn => {
+    const alvo = btn.getAttribute('data-bs-target');
+    const nomeAba = Object.keys(CRUD_UI).find(k => CRUD_UI[k].tabTarget === alvo);
+    if (nomeAba) btn.addEventListener('shown.bs.tab', () => carregarCrud(nomeAba));
+  });
+}
+
+async function carregarCrud(nomeAba) {
+  try {
+    const dados = await gs('crudListar', nomeAba);
+    CRUD_UI[nomeAba].dados = dados;
+    renderizarTabelaCrud(nomeAba, dados);
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+function colunasCrud(nomeAba, dados) {
+  return (dados && dados.length) ? Object.keys(dados[0]).filter(k => k !== '_row') : CRUD_UI[nomeAba].camposFallback;
+}
+
+function renderizarTabelaCrud(nomeAba, dados) {
+  const cfg = CRUD_UI[nomeAba];
+  const cols = colunasCrud(nomeAba, dados);
+  const podeEditar = CTX.usuario.funcao === 'Admin';
+  const tbl = document.getElementById(cfg.tabelaId);
+
+  if (!dados.length) {
+    tbl.innerHTML = '<tbody><tr><td class="text-muted">Nenhum registro cadastrado.</td></tr></tbody>';
+    return;
+  }
+
+  const thead = '<thead class="table-light"><tr>' + cols.map(c => `<th>${esc(c)}</th>`).join('') +
+    (podeEditar ? '<th class="text-end">Ações</th>' : '') + '</tr></thead>';
+
+  const tbody = '<tbody>' + dados.map(row => {
+    const tds = cols.map(c => `<td>${esc(row[c])}</td>`).join('');
+    const acoes = podeEditar ? `<td class="text-end">
+        <button class="btn btn-sm btn-outline-primary" onclick="abrirModalCrud('${nomeAba}', '${esc(row[cols[0]])}')">✎</button>
+        <button class="btn btn-sm btn-outline-danger" onclick="excluirCrud('${nomeAba}', '${esc(row[cols[0]])}')">🗑</button>
+      </td>` : '';
+    return `<tr>${tds}${acoes}</tr>`;
+  }).join('') + '</tbody>';
+
+  tbl.innerHTML = thead + tbody;
+}
+
+async function abrirModalCrud(nomeAba, idValor = null) {
+  if (!modalCrud) modalCrud = new bootstrap.Modal(document.getElementById('modalCrud'));
+
+  const cfg = CRUD_UI[nomeAba];
+  const dados = cfg.dados || [];
+  const cols = colunasCrud(nomeAba, dados);
+  const isEdit = idValor !== null && idValor !== undefined && idValor !== '';
+  const registro = isEdit ? (dados.find(r => String(r[cols[0]]) === String(idValor)) || {}) : {};
+
+  document.getElementById('modalCrudTitulo').textContent = (isEdit ? 'Editar registro — ' : 'Novo registro — ') + nomeAba;
+  crudSel = { nomeAba: nomeAba, idColuna: cols[0], idValor: isEdit ? idValor : null };
+
+  // Dropdown dinâmico: sempre que o formulário tiver ID_Curso (ex.: Matérias), busca Cad_Cursos na hora
+  let cursos = null;
+  if (cols.includes('ID_Curso') && nomeAba !== 'Cad_Cursos') {
+    cursos = await gs('crudListar', 'Cad_Cursos');
+  }
+
+  const campos = document.getElementById('modalCrudCampos');
+  campos.innerHTML = cols.map((c, i) => {
+    const valor = registro[c] != null ? registro[c] : '';
+    const ehId = i === 0;
+
+    if (c === 'ID_Curso' && cursos) {
+      const opts = cursos.map(cu => `<option value="${esc(cu['ID_Curso'])}" ${String(cu['ID_Curso']) === String(valor) ? 'selected' : ''}>${esc(cu['ID_Curso'])}${cu['Nome_Curso'] ? ' — ' + esc(cu['Nome_Curso']) : ''}</option>`).join('');
+      return `<div class="col-md-6"><label class="form-label">${esc(c)} *</label>
+        <select class="form-select campo-crud" data-campo="${esc(c)}"><option value="">Selecione…</option>${opts}</select></div>`;
+    }
+
+    const ehData = /^Data|_Data|Data_/.test(c);
+    return `<div class="col-md-6">
+      <label class="form-label">${esc(c)}${ehId ? ' *' : ''}</label>
+      <input type="${ehData ? 'date' : 'text'}" class="form-control campo-crud" data-campo="${esc(c)}" value="${esc(valor)}" ${ehId && isEdit ? 'disabled' : ''}>
+    </div>`;
+  }).join('');
+
+  modalCrud.show();
+}
+
+async function salvarCrud() {
+  const { nomeAba, idColuna, idValor } = crudSel;
+  const obj = {};
+  document.querySelectorAll('#modalCrudCampos .campo-crud').forEach(campo => {
+    if (!campo.disabled) obj[campo.getAttribute('data-campo')] = campo.value;
+  });
+  if (!idValor && !obj[idColuna]) return toast(`Informe o campo ${idColuna}.`, 'warning');
+
+  try {
+    if (idValor) await gs('crudAtualizar', nomeAba, idValor, obj);
+    else await gs('crudCriar', nomeAba, obj);
+    toast('Registro salvo com sucesso!');
+    modalCrud.hide();
+    carregarCrud(nomeAba);
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+async function excluirCrud(nomeAba, idValor) {
+  if (!confirm('Excluir este registro? Esta ação não pode ser desfeita.')) return;
+  try {
+    await gs('crudExcluir', nomeAba, idValor);
+    toast('Registro excluído.');
+    carregarCrud(nomeAba);
   } catch (e) { toast(e.message, 'danger'); }
 }
 </script>
