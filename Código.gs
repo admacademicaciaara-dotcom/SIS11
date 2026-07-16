@@ -37,7 +37,12 @@ var ABAS = {
   REGISTROS:   'Registro_Aulas_E_Atividades',
   AVALIACOES:  'Avaliacoes',
   CONFIG:      'Config_Listas',
-  EVENTOS:     'Eventos_Globais'          // NOVO — feriados/recessos (Motor de Capacidade)
+  EVENTOS:     'Eventos_Globais',         // feriados/recessos (Motor de Capacidade)
+  // NOVO — módulo DSA (Detalhe Semanal de Aula)
+  DSA_SEMANAS:    'DSA_Semanas',
+  DSA_ALTERACOES: 'DSA_Alteracoes',
+  DSA_TEMPOS:     'DSA_Tempos',
+  TIPOS_EVENTO:   'Cad_TiposEvento'
 };
 
 // Papéis com permissão de ESCRITA por aba (leitura: qualquer usuário cadastrado)
@@ -51,7 +56,12 @@ var CRUD_CONFIG = {
   'Instrutor_Materia':           { prefixo: '',    escrita: ['Admin'] },
   'Config_Listas':               { prefixo: '',    escrita: ['Admin'] },
   'Usuarios':                    { prefixo: 'USR', escrita: ['Admin'] },
-  'Eventos_Globais':             { prefixo: 'EVT', escrita: ['Admin'] }   // NOVO
+  'Eventos_Globais':             { prefixo: 'EVT', escrita: ['Admin'] },
+  // NOVO — módulo DSA
+  'DSA_Semanas':                 { prefixo: 'SEM', escrita: ['Admin', 'Operador'] },
+  'DSA_Alteracoes':              { prefixo: 'ALT', escrita: ['Admin', 'Operador'] },
+  'DSA_Tempos':                  { prefixo: 'TMP', escrita: ['Admin', 'Operador'] },
+  'Cad_TiposEvento':             { prefixo: '',    escrita: ['Admin'] }
 };
 
 // Tipos de atividade que podem ser lançados SEM matéria vinculada
@@ -62,6 +72,22 @@ var TEMPOS_POR_DIA_PADRAO = 6;
 
 // NOVO — Regime_Esforco -> tempos/dia (Contexto V1). Fallback: coluna legada Tempos_Por_Dia.
 var TEMPOS_POR_DIA_REGIME = { 'Marcha 1': 8, 'Marcha 2': 9, 'Marcha 3': 8 };
+
+// NOVO — módulo DSA: horários padrão de cada tempo de aula (1º a 9º).
+// Inferido do modelo real (planilha "C-AP-HN 2026", aba Detalhe Semanal de Aula, Google Drive
+// Controle_Cursos/Cursos Regulares). REVISAR com a Divisão de Ensino antes de oficializar —
+// são os únicos valores deste módulo que não vieram 100% confirmados linha a linha.
+var TEMPOS_HORARIO_PADRAO = [
+  { tempo: 1, periodo: 'Manhã', inicio: '07:50', fim: '08:35' },
+  { tempo: 2, periodo: 'Manhã', inicio: '08:40', fim: '09:25' },
+  { tempo: 3, periodo: 'Manhã', inicio: '09:30', fim: '10:15' },
+  { tempo: 4, periodo: 'Manhã', inicio: '10:20', fim: '11:05' },
+  { tempo: 5, periodo: 'Manhã', inicio: '11:10', fim: '11:55' },
+  { tempo: 6, periodo: 'Tarde', inicio: '13:05', fim: '13:50' },
+  { tempo: 7, periodo: 'Tarde', inicio: '13:55', fim: '14:40' },
+  { tempo: 8, periodo: 'Tarde', inicio: '14:45', fim: '15:30' },
+  { tempo: 9, periodo: 'Tarde', inicio: '15:35', fim: '16:20' }
+];
 
 // ---------------------------------------------------------------
 // AUTENTICAÇÃO (RBAC via conta Google + aba Usuarios)
@@ -208,6 +234,39 @@ function cargaHorariaDe_(materia) {
   return Number(materia['Carga_Horaria'] || materia['Carga_Horaria_Tempos'] || 0);
 }
 
+/** Como lerAbaComoObjetos_, mas devolve [] em vez de lançar erro se a aba ainda não existir. */
+function lerAbaComoObjetosSeguro_(nomeAba) {
+  if (!ss_().getSheetByName(nomeAba)) return [];
+  return lerAbaComoObjetos_(nomeAba);
+}
+
+/** Acrescenta uma coluna ao final da aba, se ela ainda não existir. */
+function garantirColuna_(nomeAba, nomeColuna) {
+  var aba = ss_().getSheetByName(nomeAba);
+  if (!aba) return;
+  var ultimaCol = Math.max(aba.getLastColumn(), 1);
+  var cab = aba.getRange(1, 1, 1, ultimaCol).getValues()[0].map(String);
+  if (cab.indexOf(nomeColuna) === -1) {
+    aba.getRange(1, ultimaCol + 1).setValue(nomeColuna);
+  }
+}
+
+/** Horários (início/fim) dos N primeiros tempos de aula do dia, conforme TEMPOS_HORARIO_PADRAO. */
+function horariosPorRegime_(regime, temposNoDia) {
+  var n = Math.max(1, Math.min(TEMPOS_HORARIO_PADRAO.length, Number(temposNoDia) || TEMPOS_POR_DIA_PADRAO));
+  return TEMPOS_HORARIO_PADRAO.slice(0, n);
+}
+
+/** Lança erro amigável se as abas do módulo DSA ainda não tiverem sido criadas. */
+function exigirEstruturaDSA_() {
+  var necessarias = [ABAS.DSA_SEMANAS, ABAS.DSA_ALTERACOES, ABAS.DSA_TEMPOS, ABAS.TIPOS_EVENTO];
+  var faltando = necessarias.filter(function (n) { return !ss_().getSheetByName(n); });
+  if (faltando.length) {
+    throw new Error('Estrutura do DSA ainda não configurada (faltam as abas: ' + faltando.join(', ') +
+      '). Peça a um Admin para clicar em "Configurar estrutura" na aba Detalhe Semanal.');
+  }
+}
+
 // ---------------------------------------------------------------
 // CONTEXTO INICIAL (carrega tudo que o front precisa nos dropdowns)
 // Expansível: novo curso/turma/matéria na planilha aparece sozinho.
@@ -252,6 +311,19 @@ function getContextoInicial() {
 
   var cfg = lerListasConfig_();
 
+  // NOVO — catálogo de eventos do módulo DSA (lê com segurança: [] se a aba ainda não existe)
+  var tiposEvento = lerAbaComoObjetosSeguro_(ABAS.TIPOS_EVENTO)
+    .filter(function (e) { return String(e['Ativo'] || 'Sim').trim().toLowerCase() !== 'não'; })
+    .map(function (e) {
+      return {
+        codigo: e['Codigo'],
+        categoria: e['Categoria'],
+        nome: e['Nome'],
+        requerMateria: String(e['Requer_Materia'] || '').trim().toLowerCase() === 'sim',
+        requerInstrutor: String(e['Requer_Instrutor'] || '').trim().toLowerCase() === 'sim'
+      };
+    });
+
   return {
     usuario: usuario,
     turmas: turmas,
@@ -263,6 +335,7 @@ function getContextoInicial() {
     tiposAvaliacao: cfg.tiposAvaliacao,
     statusAvaliacao: cfg.statusAvaliacao,
     tiposSemMateria: TIPOS_SEM_MATERIA,
+    tiposEvento: tiposEvento,
     hoje: Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd')
   };
 }
@@ -473,6 +546,377 @@ function registrarAvaliacao(obj) {
 
   obj['Registrado_Por'] = usuario.email; // paridade de auditoria com registrarAula; inofensivo se a coluna não existir
   return crudCriar(ABAS.AVALIACOES, obj);
+}
+
+// ---------------------------------------------------------------
+// DSA — DETALHE SEMANAL DE AULA (versão semanal do Registro de Aulas)
+// ---------------------------------------------------------------
+
+/**
+ * Cria as abas do módulo DSA se ainda não existirem, semeia o catálogo padrão de
+ * Cad_TiposEvento e garante as colunas de rastreio em Registro_Aulas_E_Atividades.
+ * Rode uma vez (via botão "Configurar estrutura" no front, ou pelo editor do Apps Script).
+ */
+function configurarSistemaDSA() {
+  exigirFuncao(['Admin']);
+
+  var especificacoes = {
+    'DSA_Semanas':    ['ID_Semana', 'ID_Turma', 'Numero_Semana', 'Data_Inicio', 'Data_Fim', 'Regime_Esforco', 'Status', 'Versao_Atual', 'Criado_Por', 'Criado_Em', 'Atualizado_Por', 'Atualizado_Em'],
+    'DSA_Alteracoes': ['ID_Alteracao', 'ID_Semana', 'Numero_Alteracao', 'Tipo', 'Alterado_Por', 'Alterado_Em', 'Snapshot_JSON', 'Observacao'],
+    'DSA_Tempos':     ['ID_Tempo', 'ID_Semana', 'Data', 'Tempo_Num', 'Periodo', 'Hora_Inicio', 'Hora_Fim', 'Tipo_Registro', 'ID_Grade', 'ID_TipoEvento', 'ID_Instrutor', 'Local', 'TE', 'Descricao_UE', 'Observacoes'],
+    'Cad_TiposEvento': ['Codigo', 'Categoria', 'Nome', 'Requer_Materia', 'Requer_Instrutor', 'Ativo']
+  };
+
+  var criadas = [];
+  Object.keys(especificacoes).forEach(function (nome) {
+    if (!ss_().getSheetByName(nome)) {
+      var aba = ss_().insertSheet(nome);
+      aba.getRange(1, 1, 1, especificacoes[nome].length).setValues([especificacoes[nome]]);
+      aba.setFrozenRows(1);
+      criadas.push(nome);
+    }
+  });
+
+  if (criadas.indexOf('Cad_TiposEvento') !== -1) {
+    var padrao = [
+      ['TR',    'Tempo Reserva/Estudo',       'Tempo Reserva (Estudo Dirigido)',  'Não', 'Não', 'Sim'],
+      ['EI',    'Tempo Reserva/Estudo',       'Estudo Individual',                'Não', 'Não', 'Sim'],
+      ['LA',    'Licença Administrativa',     'Licença Administrativa',           'Não', 'Não', 'Sim'],
+      ['FR',    'Licença Administrativa',     'Feriado',                          'Não', 'Não', 'Sim'],
+      ['EC',    'Atividade Extracurricular',  'Extra-Classe',                     'Não', 'Não', 'Sim'],
+      ['PAL',   'Evento Extra',               'Palestra',                         'Não', 'Sim', 'Sim'],
+      ['SIMP',  'Evento Extra',               'Simpósio',                         'Não', 'Não', 'Sim'],
+      ['COLQ',  'Evento Extra',               'Colóquio',                         'Não', 'Não', 'Sim'],
+      ['CERIM', 'Evento Extra',               'Evento/Cerimônia',                 'Não', 'Não', 'Sim'],
+      ['TA',    'Tarefa Administrativa',      'Tarefa Administrativa',            'Não', 'Não', 'Sim'],
+      ['AV',    'Avaliação',                  'Avaliação (Prova/Trabalho)',       'Sim', 'Sim', 'Sim'],
+      ['VP',    'Avaliação',                  'Vista de Prova',                   'Sim', 'Sim', 'Sim']
+    ];
+    ss_().getSheetByName('Cad_TiposEvento').getRange(2, 1, padrao.length, padrao[0].length).setValues(padrao);
+  }
+
+  garantirColuna_(ABAS.REGISTROS, 'ID_Semana_DSA');
+  garantirColuna_(ABAS.REGISTROS, 'ID_Tempo_DSA');
+
+  return {
+    ok: true,
+    abasCriadas: criadas,
+    mensagem: criadas.length ? ('Estrutura criada: ' + criadas.join(', ') + '.') : 'Estrutura do DSA já existia — nada a fazer.'
+  };
+}
+
+/**
+ * Calcula todas as semanas do curso (a partir de Data_Inicio/Data_Termino da turma),
+ * cruza com DSA_Semanas já salvas e identifica a semana atual (abertura inteligente):
+ * a primeira semana que ainda não está com status "Oficial".
+ */
+function getEstruturaSemanas(idTurma) {
+  exigirFuncao(['Admin', 'Operador', 'Visualizacao']);
+  exigirEstruturaDSA_();
+
+  var turma = lerAbaComoObjetos_(ABAS.TURMAS).filter(function (t) { return t['ID_Turma'] === idTurma; })[0];
+  if (!turma) throw new Error('Turma não encontrada: ' + idTurma);
+
+  var inicio = isoParaDate_(turma['Data_Inicio']);
+  var termino = isoParaDate_(turma['Data_Termino']);
+  if (!(inicio instanceof Date) || !(termino instanceof Date)) {
+    throw new Error('A turma ' + idTurma + ' não tem Data_Inicio/Data_Termino definidas.');
+  }
+  var regime = turma['Regime_Esforco'] || '';
+  var incluirSabado = (regime === 'Marcha 3');
+  var diasNaSemana = incluirSabado ? 6 : 5;
+
+  var existentesPorNumero = {};
+  lerAbaComoObjetos_(ABAS.DSA_SEMANAS)
+    .filter(function (s) { return s['ID_Turma'] === idTurma; })
+    .forEach(function (s) { existentesPorNumero[Number(s['Numero_Semana'])] = s; });
+
+  var semanas = [];
+  var cursor = new Date(inicio.getTime());
+  var numero = 1;
+  while (cursor <= termino) {
+    var fimSemana = new Date(cursor.getTime());
+    fimSemana.setDate(fimSemana.getDate() + (diasNaSemana - 1));
+    if (fimSemana > termino) fimSemana = new Date(termino.getTime());
+
+    var existente = existentesPorNumero[numero];
+    semanas.push({
+      numero: numero,
+      dataInicio: Utilities.formatDate(cursor, tz_(), 'yyyy-MM-dd'),
+      dataFim: Utilities.formatDate(fimSemana, tz_(), 'yyyy-MM-dd'),
+      status: existente ? existente['Status'] : 'Não iniciada',
+      idSemana: existente ? existente['ID_Semana'] : null,
+      versaoAtual: existente ? Number(existente['Versao_Atual']) : null
+    });
+
+    cursor.setDate(cursor.getDate() + 7);
+    numero++;
+  }
+
+  var idxAtual = semanas.findIndex(function (s) { return s.status !== 'Oficial'; });
+  var semanaAtual = idxAtual === -1 ? (semanas.length ? semanas[semanas.length - 1].numero : 1) : semanas[idxAtual].numero;
+
+  return { semanas: semanas, semanaAtual: semanaAtual };
+}
+
+/** Cabeçalho + grid atual + histórico de alterações de uma semana específica do DSA. */
+function getDSASemana(idTurma, numeroSemana) {
+  exigirFuncao(['Admin', 'Operador', 'Visualizacao']);
+  exigirEstruturaDSA_();
+
+  var turma = lerAbaComoObjetos_(ABAS.TURMAS).filter(function (t) { return t['ID_Turma'] === idTurma; })[0];
+  if (!turma) throw new Error('Turma não encontrada: ' + idTurma);
+
+  var estrutura = getEstruturaSemanas(idTurma);
+  var infoSemana = estrutura.semanas.filter(function (s) { return s.numero === Number(numeroSemana); })[0];
+  if (!infoSemana) throw new Error('Semana ' + numeroSemana + ' fora do intervalo do curso ' + idTurma + '.');
+
+  var regime = turma['Regime_Esforco'] || '';
+  var temposPorDia = TEMPOS_POR_DIA_REGIME[regime] || Number(turma['Tempos_Por_Dia']) || TEMPOS_POR_DIA_PADRAO;
+  var incluirSabado = (regime === 'Marcha 3');
+
+  var tempos = [];
+  var historico = [];
+  if (infoSemana.idSemana) {
+    tempos = lerAbaComoObjetos_(ABAS.DSA_TEMPOS).filter(function (t) { return t['ID_Semana'] === infoSemana.idSemana; });
+    historico = lerAbaComoObjetos_(ABAS.DSA_ALTERACOES)
+      .filter(function (a) { return a['ID_Semana'] === infoSemana.idSemana; })
+      .map(function (a) {
+        return { numero: Number(a['Numero_Alteracao']), tipo: a['Tipo'], por: a['Alterado_Por'], em: a['Alterado_Em'], obs: a['Observacao'] || '' };
+      })
+      .sort(function (a, b) { return a.numero - b.numero; });
+  }
+
+  return {
+    turma: { idTurma: turma['ID_Turma'], nome: turma['Nome_Completo_Curso'], regime: regime },
+    semana: infoSemana,
+    temposPorDia: temposPorDia,
+    incluirSabado: incluirSabado,
+    horarios: horariosPorRegime_(regime, Math.max(temposPorDia, TEMPOS_POR_DIA_REGIME['Marcha 2'])),
+    tempos: tempos,
+    historico: historico
+  };
+}
+
+/**
+ * Algoritmo de alocação (v1): cruza as matérias com saldo pendente (mesma lógica de
+ * saldoDaMateria_ já usada no resto do sistema) com a capacidade da semana e preenche
+ * os tempos em blocos contínuos, autopreenchendo o instrutor pelo vínculo Instrutor_Materia.
+ * O resultado é salvo com status "Prévia" — o usuário pode reescrever tudo antes de confirmar.
+ */
+function gerarPreviaDSA(idTurma, numeroSemana) {
+  var usuario = exigirFuncao(['Admin', 'Operador']);
+  exigirEstruturaDSA_();
+
+  var turma = lerAbaComoObjetos_(ABAS.TURMAS).filter(function (t) { return t['ID_Turma'] === idTurma; })[0];
+  if (!turma) throw new Error('Turma não encontrada: ' + idTurma);
+
+  var estrutura = getEstruturaSemanas(idTurma);
+  var infoSemana = estrutura.semanas.filter(function (s) { return s.numero === Number(numeroSemana); })[0];
+  if (!infoSemana) throw new Error('Semana ' + numeroSemana + ' fora do intervalo do curso ' + idTurma + '.');
+  if (infoSemana.status === 'Oficial') {
+    throw new Error('A semana ' + numeroSemana + ' já está com registro Oficial. Edite manualmente em vez de gerar nova prévia.');
+  }
+
+  var regime = turma['Regime_Esforco'] || '';
+  var temposPorDia = TEMPOS_POR_DIA_REGIME[regime] || Number(turma['Tempos_Por_Dia']) || TEMPOS_POR_DIA_PADRAO;
+  var horarios = horariosPorRegime_(regime, temposPorDia);
+
+  var materias = lerAbaComoObjetos_(ABAS.MATERIAS).filter(function (m) { return String(m['ID_Curso']) === String(turma['ID_Curso']); });
+  var fila = materias
+    .map(function (m) {
+      var saldo = saldoDaMateria_(idTurma, m['ID_Grade']);
+      return { idGrade: m['ID_Grade'], saldo: saldo.saldo };
+    })
+    .filter(function (m) { return m.saldo > 0; });
+
+  var vinculos = lerAbaComoObjetos_(ABAS.VINCULOS);
+  function instrutorPadrao_(idGrade) {
+    var v = vinculos.filter(function (v) {
+      var chaves = Object.keys(v);
+      var vGrade = String(v['ID_Grade (Matéria)'] || v['ID_Grade'] || '');
+      return vGrade === String(idGrade);
+    })[0];
+    if (!v) return '';
+    var chaves = Object.keys(v);
+    return String(v['ID_Instrutor'] || v[chaves[1]] || '');
+  }
+
+  var diasDaSemana = [];
+  var cursor = isoParaDate_(infoSemana.dataInicio);
+  var fimSemana = isoParaDate_(infoSemana.dataFim);
+  while (cursor <= fimSemana) {
+    diasDaSemana.push(Utilities.formatDate(cursor, tz_(), 'yyyy-MM-dd'));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  var novosTempos = [];
+  diasDaSemana.forEach(function (dataISO) {
+    for (var i = 0; i < temposPorDia; i++) {
+      var h = horarios[i];
+      while (fila.length && fila[0].saldo <= 0) fila.shift();
+      var alocacao = fila.length ? fila[0] : null;
+
+      if (alocacao) {
+        alocacao.saldo -= 1;
+        novosTempos.push({
+          data: dataISO, tempoNum: h.tempo, periodo: h.periodo, horaInicio: h.inicio, horaFim: h.fim,
+          tipoRegistro: 'Materia', idGrade: alocacao.idGrade, idTipoEvento: '',
+          idInstrutor: instrutorPadrao_(alocacao.idGrade), local: '', te: 'EO', descricaoUE: '', observacoes: ''
+        });
+      } else {
+        novosTempos.push({
+          data: dataISO, tempoNum: h.tempo, periodo: h.periodo, horaInicio: h.inicio, horaFim: h.fim,
+          tipoRegistro: 'Evento', idGrade: '', idTipoEvento: 'TR',
+          idInstrutor: '', local: '', te: 'EI', descricaoUE: '', observacoes: 'Gerado pela Prévia automática — sem matéria pendente disponível.'
+        });
+      }
+    }
+  });
+
+  return salvarDSA_({
+    idTurma: idTurma, numeroSemana: numeroSemana, regime: regime,
+    dataInicio: infoSemana.dataInicio, dataFim: infoSemana.dataFim,
+    tempos: novosTempos, tipoAlteracao: 'Prévia_Automática', usuario: usuario, observacao: ''
+  }, infoSemana.idSemana);
+}
+
+/** Salva a semana (Prévia editada ou Oficial) vinda do front, registrando nova Alteração. */
+function salvarDSA(payload) {
+  var usuario = exigirFuncao(['Admin', 'Operador']);
+  exigirEstruturaDSA_();
+
+  if (!payload || !payload.idTurma || !payload.numeroSemana || !payload.tempos) {
+    throw new Error('Dados incompletos para salvar o Detalhe Semanal de Aula.');
+  }
+
+  var turma = lerAbaComoObjetos_(ABAS.TURMAS).filter(function (t) { return t['ID_Turma'] === payload.idTurma; })[0];
+  if (!turma) throw new Error('Turma não encontrada: ' + payload.idTurma);
+
+  var estrutura = getEstruturaSemanas(payload.idTurma);
+  var infoSemana = estrutura.semanas.filter(function (s) { return s.numero === Number(payload.numeroSemana); })[0];
+  if (!infoSemana) throw new Error('Semana ' + payload.numeroSemana + ' fora do intervalo do curso ' + payload.idTurma + '.');
+
+  return salvarDSA_({
+    idTurma: payload.idTurma, numeroSemana: payload.numeroSemana, regime: turma['Regime_Esforco'] || '',
+    dataInicio: infoSemana.dataInicio, dataFim: infoSemana.dataFim,
+    tempos: payload.tempos, tipoAlteracao: 'Edição_Manual', usuario: usuario, observacao: payload.observacao || ''
+  }, infoSemana.idSemana);
+}
+
+/**
+ * Núcleo do versionamento: cria/atualiza DSA_Semanas, regrava DSA_Tempos do zero (mais
+ * simples e seguro que diff célula a célula) e grava uma nova linha em DSA_Alteracoes
+ * com snapshot completo — é o "Alteração 1, 2, 3..." pedido. Só promove a semana para
+ * "Oficial" (e só então sincroniza com Registro_Aulas_E_Atividades) numa Edição_Manual;
+ * uma Prévia_Automática fica marcada como rascunho e não entra nos dashboards ainda.
+ */
+function salvarDSA_(dados, idSemanaExistente) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var agora = new Date();
+    var idSemana = idSemanaExistente;
+    var novaVersao = 0;
+    var statusFinal = dados.tipoAlteracao === 'Prévia_Automática' ? 'Prévia' : 'Oficial';
+
+    if (!idSemana) {
+      var criada = crudCriar(ABAS.DSA_SEMANAS, {
+        'ID_Semana': '', 'ID_Turma': dados.idTurma, 'Numero_Semana': dados.numeroSemana,
+        'Data_Inicio': dados.dataInicio, 'Data_Fim': dados.dataFim, 'Regime_Esforco': dados.regime,
+        'Status': statusFinal, 'Versao_Atual': 0,
+        'Criado_Por': dados.usuario.email, 'Criado_Em': agora, 'Atualizado_Por': dados.usuario.email, 'Atualizado_Em': agora
+      });
+      idSemana = criada.id;
+    } else {
+      var semanaAtual = lerAbaComoObjetos_(ABAS.DSA_SEMANAS).filter(function (s) { return s['ID_Semana'] === idSemana; })[0];
+      novaVersao = Number(semanaAtual['Versao_Atual']) + 1;
+      crudAtualizar(ABAS.DSA_SEMANAS, idSemana, {
+        'Status': statusFinal, 'Versao_Atual': novaVersao,
+        'Atualizado_Por': dados.usuario.email, 'Atualizado_Em': agora
+      });
+    }
+
+    // Regrava os tempos da semana do zero (o estado "vivo" fica só em DSA_Tempos; o
+    // histórico versionado fica no snapshot de DSA_Alteracoes abaixo).
+    var abaTempos = ss_().getSheetByName(ABAS.DSA_TEMPOS);
+    var valoresTempos = abaTempos.getDataRange().getValues();
+    for (var r = valoresTempos.length - 1; r >= 1; r--) {
+      if (String(valoresTempos[r][1]) === String(idSemana)) abaTempos.deleteRow(r + 1);
+    }
+    dados.tempos.forEach(function (t) {
+      crudCriar(ABAS.DSA_TEMPOS, {
+        'ID_Tempo': '', 'ID_Semana': idSemana, 'Data': t.data, 'Tempo_Num': t.tempoNum, 'Periodo': t.periodo,
+        'Hora_Inicio': t.horaInicio, 'Hora_Fim': t.horaFim, 'Tipo_Registro': t.tipoRegistro,
+        'ID_Grade': t.idGrade || '', 'ID_TipoEvento': t.idTipoEvento || '', 'ID_Instrutor': t.idInstrutor || '',
+        'Local': t.local || '', 'TE': t.te || '', 'Descricao_UE': t.descricaoUE || '', 'Observacoes': t.observacoes || ''
+      });
+    });
+
+    crudCriar(ABAS.DSA_ALTERACOES, {
+      'ID_Alteracao': '', 'ID_Semana': idSemana, 'Numero_Alteracao': novaVersao, 'Tipo': dados.tipoAlteracao,
+      'Alterado_Por': dados.usuario.email, 'Alterado_Em': agora,
+      'Snapshot_JSON': JSON.stringify(dados.tempos), 'Observacao': dados.observacao || ''
+    });
+
+    if (statusFinal === 'Oficial') sincronizarRegistroAulas_(idSemana, dados.idTurma);
+
+    return { ok: true, idSemana: idSemana, versao: novaVersao, status: statusFinal };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Sincroniza DSA_Tempos -> Registro_Aulas_E_Atividades (insere/atualiza/remove), cumprindo
+ * o requisito de manter o registro oficial de aulas espelhado no que está no DSA. Só
+ * tempos com matéria, ou eventos de categoria letiva (Avaliação/Extracurricular/Evento
+ * Extra), viram registro de aula — Licença Administrativa, Feriado e Tempo Reserva/Estudo
+ * são administrativos e não entram no cômputo de aulas ministradas.
+ */
+function sincronizarRegistroAulas_(idSemana, idTurma) {
+  var CATEGORIAS_LETIVAS = ['Avaliação', 'Atividade Extracurricular', 'Evento Extra'];
+  var tiposEventoPorCodigo = {};
+  lerAbaComoObjetos_(ABAS.TIPOS_EVENTO).forEach(function (e) { tiposEventoPorCodigo[e['Codigo']] = e; });
+
+  var tempos = lerAbaComoObjetos_(ABAS.DSA_TEMPOS).filter(function (t) { return t['ID_Semana'] === idSemana; });
+  var registrosExistentes = lerAbaComoObjetos_(ABAS.REGISTROS).filter(function (r) { return r['ID_Semana_DSA'] === idSemana; });
+  var existentesPorTempo = {};
+  registrosExistentes.forEach(function (r) { existentesPorTempo[r['ID_Tempo_DSA']] = r; });
+
+  var mantidos = {};
+  tempos.forEach(function (t) {
+    var ev = tiposEventoPorCodigo[t['ID_TipoEvento']];
+    var deveSincronizar = t['Tipo_Registro'] === 'Materia' ||
+      (t['Tipo_Registro'] === 'Evento' && ev && CATEGORIAS_LETIVAS.indexOf(ev['Categoria']) !== -1);
+    if (!deveSincronizar) return;
+
+    mantidos[t['ID_Tempo']] = true;
+    var dadosLinha = {
+      'Data': t['Data'], 'ID_Turma': idTurma,
+      'ID_Grade': t['Tipo_Registro'] === 'Materia' ? t['ID_Grade'] : '',
+      'ID_Instrutor': t['ID_Instrutor'] || '',
+      'Tipo_Atividade': t['Tipo_Registro'] === 'Materia' ? 'Aula' : (ev ? ev['Nome'] : ''),
+      'Metodologia': t['TE'] || '',
+      'Tempos_Consumidos': 1,
+      'Conteudo_Resumo': t['Descricao_UE'] || '',
+      'Observacoes': t['Observacoes'] || '',
+      'Registrado_Por': 'DSA (sincronização automática)',
+      'ID_Semana_DSA': idSemana,
+      'ID_Tempo_DSA': t['ID_Tempo']
+    };
+
+    var existente = existentesPorTempo[t['ID_Tempo']];
+    if (existente) {
+      crudAtualizar(ABAS.REGISTROS, existente['ID_Registro'], dadosLinha);
+    } else {
+      crudCriar(ABAS.REGISTROS, dadosLinha);
+    }
+  });
+
+  registrosExistentes.forEach(function (r) {
+    if (!mantidos[r['ID_Tempo_DSA']]) crudExcluir(ABAS.REGISTROS, r['ID_Registro']);
+  });
 }
 
 // ---------------------------------------------------------------
