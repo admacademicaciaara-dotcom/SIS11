@@ -293,7 +293,7 @@ function getContextoInicial() {
     return {
       idGrade: m['ID_Grade'],
       idCurso: m['ID_Curso'],
-      cod: m['Cod'],
+      cod: m['Cod_Matéria'] || m['Cod'], // ALTERADO — coluna real da planilha é "Cod_Matéria"
       nome: m['Nome_Materia'],
       cargaHoraria: Number(m['Carga_Horaria']) || 0
     };
@@ -722,7 +722,9 @@ function gerarPreviaDSA(idTurma, numeroSemana) {
   var temposPorDia = TEMPOS_POR_DIA_REGIME[regime] || Number(turma['Tempos_Por_Dia']) || TEMPOS_POR_DIA_PADRAO;
   var horarios = horariosPorRegime_(regime, temposPorDia);
 
-  var materias = lerAbaComoObjetos_(ABAS.MATERIAS).filter(function (m) { return String(m['ID_Curso']) === String(turma['ID_Curso']); });
+  var materias = lerAbaComoObjetos_(ABAS.MATERIAS)
+    .filter(function (m) { return String(m['ID_Curso']) === String(turma['ID_Curso']); })
+    .sort(function (a, b) { return (Number(a['Ordem_Sugerida']) || 0) - (Number(b['Ordem_Sugerida']) || 0); });
   var fila = materias
     .map(function (m) {
       var saldo = saldoDaMateria_(idTurma, m['ID_Grade']);
@@ -999,7 +1001,7 @@ function getDashboardTurma(idTurma) {
     var pct = prevista ? Math.round(100 * consumida / prevista) : 0;
     var st = consumida === 0 ? 'Não iniciada' : (consumida >= prevista ? 'Concluída' : 'Em andamento');
     if (consumida > prevista) st = 'Excedida';
-    return { idGrade: m['ID_Grade'], cod: m['Cod'], nome: m['Nome_Materia'], prevista: prevista, consumida: consumida, saldo: prevista - consumida, pct: pct, status: st };
+    return { idGrade: m['ID_Grade'], cod: m['Cod_Matéria'] || m['Cod'], nome: m['Nome_Materia'], prevista: prevista, consumida: consumida, saldo: prevista - consumida, pct: pct, status: st };
   });
 
   var totPrev = linhas.reduce(function (s, l) { return s + l.prevista; }, 0);
