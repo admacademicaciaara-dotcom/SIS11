@@ -37,7 +37,8 @@ var ABAS = {
   REGISTROS:   'Registro_Aulas_E_Atividades',
   AVALIACOES:  'Avaliacoes',
   CONFIG:      'Config_Listas',
-  EVENTOS:     'Eventos_Globais'          // NOVO — feriados/recessos (Motor de Capacidade)
+  EVENTOS:     'Eventos_Globais',         // feriados/recessos (Motor de Capacidade)
+  SELECOES:    'Instrutor_Turma_Selecao'  // NOVO — Dashboard de Instrutores (Qualificados x Selecionados)
 };
 
 // Papéis com permissão de ESCRITA por aba (leitura: qualquer usuário cadastrado)
@@ -51,7 +52,8 @@ var CRUD_CONFIG = {
   'Instrutor_Materia':           { prefixo: '',    escrita: ['Admin'] },
   'Config_Listas':               { prefixo: '',    escrita: ['Admin'] },
   'Usuarios':                    { prefixo: 'USR', escrita: ['Admin'] },
-  'Eventos_Globais':             { prefixo: 'EVT', escrita: ['Admin'] }   // NOVO
+  'Eventos_Globais':             { prefixo: 'EVT', escrita: ['Admin'] },
+  'Instrutor_Turma_Selecao':     { prefixo: 'SEL', escrita: ['Admin'] }   // NOVO
 };
 
 // Tipos de atividade que podem ser lançados SEM matéria vinculada
@@ -206,6 +208,12 @@ function feriadosDiaInteiro_() {
 /** Carga horária de uma matéria, tolerando Carga_Horaria OU Carga_Horaria_Tempos como nome de coluna. */
 function cargaHorariaDe_(materia) {
   return Number(materia['Carga_Horaria'] || materia['Carga_Horaria_Tempos'] || 0);
+}
+
+/** Como lerAbaComoObjetos_, mas devolve [] em vez de lançar erro se a aba ainda não existir. */
+function lerAbaComoObjetosSeguro_(nomeAba) {
+  if (!ss_().getSheetByName(nomeAba)) return [];
+  return lerAbaComoObjetos_(nomeAba);
 }
 
 // ---------------------------------------------------------------
@@ -375,6 +383,19 @@ function crudExcluir(nomeAba, id) {
 }
 
 // ---------------------------------------------------------------
+// REGRAS DE INTEGRIDADE (reutilizáveis entre módulos)
+// ---------------------------------------------------------------
+/** true se o instrutor está vinculado (habilitado) para a matéria em Instrutor_Materia. */
+function instrutorHabilitado_(idInstrutor, idGrade) {
+  return lerAbaComoObjetos_(ABAS.VINCULOS).some(function (v) {
+    var chaves = Object.keys(v);
+    var vInstrutor = String(v['ID_Instrutor'] || v[chaves[1]] || '');
+    var vGrade = String(v['ID_Grade (Matéria)'] || v['ID_Grade'] || '');
+    return vGrade === String(idGrade) && vInstrutor === String(idInstrutor);
+  });
+}
+
+// ---------------------------------------------------------------
 // REGISTRO DE AULAS (com validações de negócio)
 // ---------------------------------------------------------------
 function registrarAula(p) {
@@ -402,17 +423,9 @@ function registrarAula(p) {
     }
   }
 
-  // NOVO — Valida que o instrutor está habilitado (vinculado) na matéria: Contexto V1, regra 1
-  if (p.idGrade) {
-    var habilitado = lerAbaComoObjetos_(ABAS.VINCULOS).some(function (v) {
-      var chaves = Object.keys(v);
-      var vInstrutor = String(v['ID_Instrutor'] || v[chaves[1]] || '');
-      var vGrade = String(v['ID_Grade (Matéria)'] || v['ID_Grade'] || '');
-      return vGrade === String(p.idGrade) && vInstrutor === String(p.idInstrutor);
-    });
-    if (!habilitado) {
-      throw new Error('O instrutor selecionado não está habilitado (vinculado) para ministrar esta matéria.');
-    }
+  // Valida que o instrutor está habilitado (vinculado) na matéria: Contexto V1, regra 1
+  if (p.idGrade && !instrutorHabilitado_(p.idInstrutor, p.idGrade)) {
+    throw new Error('O instrutor selecionado não está habilitado (vinculado) para ministrar esta matéria.');
   }
 
   var res = crudCriar(ABAS.REGISTROS, {
@@ -461,14 +474,8 @@ function registrarAvaliacao(obj) {
     throw new Error('A matéria não pertence ao curso da turma ' + obj['ID_Turma'] + '.');
   }
 
-  if (obj['ID_Instrutor_Responsavel']) {
-    var habilitado = lerAbaComoObjetos_(ABAS.VINCULOS).some(function (v) {
-      var chaves = Object.keys(v);
-      var vInstrutor = String(v['ID_Instrutor'] || v[chaves[1]] || '');
-      var vGrade = String(v['ID_Grade (Matéria)'] || v['ID_Grade'] || '');
-      return vGrade === String(obj['ID_Grade']) && vInstrutor === String(obj['ID_Instrutor_Responsavel']);
-    });
-    if (!habilitado) throw new Error('O instrutor responsável não está habilitado nesta matéria.');
+  if (obj['ID_Instrutor_Responsavel'] && !instrutorHabilitado_(obj['ID_Instrutor_Responsavel'], obj['ID_Grade'])) {
+    throw new Error('O instrutor responsável não está habilitado nesta matéria.');
   }
 
   obj['Registrado_Por'] = usuario.email; // paridade de auditoria com registrarAula; inofensivo se a coluna não existir
@@ -585,6 +592,80 @@ function getDashboardTurma(idTurma) {
     materias: linhas,
     avaliacoes: avaliacoes
   };
+}
+
+// ---------------------------------------------------------------
+// DASHBOARD DE INSTRUTORES (Qualificados x Selecionados)
+// ---------------------------------------------------------------
+/**
+ * Cad_Matérias enriquecida com um campo calculado "instrutoresSelecionados",
+ * montado a partir de Instrutor_Turma_Selecao (só linhas com Status = 'Ativo').
+ * Degrada com segurança: se a aba ainda não existir, todo mundo fica com [].
+ */
+function listarMateriasComSelecao() {
+  exigirFuncao(['Admin', 'Operador', 'Visualizacao']);
+
+  var instrutoresPorId = {};
+  lerAbaComoObjetos_(ABAS.INSTRUTORES).forEach(function (i) {
+    instrutoresPorId[String(i['ID_Instrutor'])] = i;
+  });
+
+  var selecoesPorGrade = {};
+  lerAbaComoObjetosSeguro_(ABAS.SELECOES)
+    .filter(function (s) { return String(s['Status'] || '').trim() === 'Ativo'; })
+    .forEach(function (s) {
+      var idGrade = String(s['ID_Grade'] || '');
+      if (!idGrade) return;
+      if (!selecoesPorGrade[idGrade]) selecoesPorGrade[idGrade] = [];
+      var instr = instrutoresPorId[String(s['ID_Instrutor'])];
+      selecoesPorGrade[idGrade].push({
+        idSelecao: s['ID_Selecao'],
+        idInstrutor: String(s['ID_Instrutor']),
+        pg: instr ? instr['P/G'] : '',
+        nome: instr ? instr['NOME'] : String(s['ID_Instrutor'])
+      });
+    });
+
+  return lerAbaComoObjetos_(ABAS.MATERIAS).map(function (m) {
+    return {
+      idGrade: m['ID_Grade'],
+      idCurso: m['ID_Curso'],
+      cod: m['Cod_Matéria'] || m['Cod'],
+      nome: m['Nome_Materia'],
+      cargaHoraria: cargaHorariaDe_(m),
+      instrutoresSelecionados: selecoesPorGrade[String(m['ID_Grade'])] || []
+    };
+  });
+}
+
+/**
+ * Marca um instrutor como "Selecionado" (Status=Ativo) para uma matéria.
+ * Reaproveita instrutorHabilitado_ para impedir selecionar quem não está
+ * vinculado (Instrutor_Materia) — a mesma regra usada em registrarAula.
+ */
+function criarSelecaoInstrutor(idInstrutor, idGrade) {
+  var usuario = exigirFuncao(['Admin']);
+  if (!idInstrutor || !idGrade) throw new Error('Selecione a matéria e o instrutor.');
+
+  if (!ss_().getSheetByName(ABAS.SELECOES)) {
+    throw new Error('A aba "' + ABAS.SELECOES + '" ainda não existe na planilha. Crie-a com as colunas: ' +
+      'ID_Selecao, ID_Instrutor, ID_Grade, Status, Selecionado_Por, Selecionado_Em.');
+  }
+
+  if (!instrutorHabilitado_(idInstrutor, idGrade)) {
+    throw new Error('Este instrutor não está habilitado (vinculado) para esta matéria em Instrutor_Materia.');
+  }
+
+  var jaAtivo = lerAbaComoObjetos_(ABAS.SELECOES).some(function (s) {
+    return String(s['ID_Instrutor']) === String(idInstrutor) && String(s['ID_Grade']) === String(idGrade) &&
+      String(s['Status'] || '').trim() === 'Ativo';
+  });
+  if (jaAtivo) throw new Error('Este instrutor já está selecionado (ativo) para esta matéria.');
+
+  return crudCriar(ABAS.SELECOES, {
+    'ID_Selecao': '', 'ID_Instrutor': idInstrutor, 'ID_Grade': idGrade,
+    'Status': 'Ativo', 'Selecionado_Por': usuario.email, 'Selecionado_Em': new Date()
+  });
 }
 
 // ---------------------------------------------------------------

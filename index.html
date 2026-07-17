@@ -133,12 +133,20 @@
       <div class="table-responsive"><table class="table table-sm table-striped align-middle" id="tblMaterias"></table></div>
     </div>
 
-    <!-- ============ INSTRUTORES ============ -->
+    <!-- ============ INSTRUTORES (Dashboard: Qualificados x Selecionados) ============ -->
     <div class="tab-pane fade" id="tabInstrutores">
-      <div class="d-flex justify-content-between align-items-center mb-3">
-        <h5 class="mb-0">Corpo Docente</h5>
-        <button class="btn btn-primary btn-sm admin-only" onclick="abrirModalCrud('Cad_Instrutor')">+ Novo Instrutor</button>
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <h5 class="mb-0">Dashboard de Instrutores</h5>
+        <div class="d-flex gap-2">
+          <button class="btn btn-success btn-sm admin-only" id="btnSelecionarInstrutor" style="display:none" onclick="abrirModalSelecionarInstrutor()">➕ Selecionar Instrutor</button>
+          <button class="btn btn-primary btn-sm admin-only" onclick="abrirModalCrud('Cad_Instrutor')">+ Cadastrar Novo Instrutor</button>
+        </div>
       </div>
+
+      <div id="instrFiltroGlobal" class="mb-3"></div>
+      <div id="instrKPIs" class="row g-3 mb-3"></div>
+      <div id="instrGraficos" class="row g-3 mb-3"></div>
+
       <div class="table-responsive"><table class="table table-sm table-striped align-middle" id="tblInstrutores"></table></div>
     </div>
 
@@ -170,7 +178,36 @@
   </div>
 </div>
 
+<!-- MODAL: SELECIONAR INSTRUTOR (Dashboard de Instrutores, modo "Por Curso") -->
+<div class="modal fade" id="modalSelecionarInstrutor" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Selecionar Instrutor para o Curso</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <div class="col-12">
+            <label class="form-label">Matéria *</label>
+            <select id="selMateriaSelecao" class="form-select" onchange="preencherInstrutores('selInstrutorSelecao', this.value)"></select>
+          </div>
+          <div class="col-12">
+            <label class="form-label">Instrutor habilitado *</label>
+            <select id="selInstrutorSelecao" class="form-select"><option value="">Selecione a matéria primeiro…</option></select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" onclick="confirmarSelecaoInstrutor()">Selecionar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script>
 /* =============================================================
    ESTADO GLOBAL
@@ -592,6 +629,10 @@ let crudSel = null; // { nomeAba, idColuna, idValor }
 function ligarAbasCrud() {
   document.querySelectorAll('#abas [data-bs-target]').forEach(btn => {
     const alvo = btn.getAttribute('data-bs-target');
+    if (alvo === '#tabInstrutores') {
+      btn.addEventListener('shown.bs.tab', () => carregarDashboardInstrutores());
+      return;
+    }
     const nomeAba = Object.keys(CRUD_UI).find(k => CRUD_UI[k].tabTarget === alvo);
     if (nomeAba) btn.addEventListener('shown.bs.tab', () => carregarCrud(nomeAba));
   });
@@ -697,6 +738,269 @@ async function excluirCrud(nomeAba, idValor) {
     await gs('crudExcluir', nomeAba, idValor);
     toast('Registro excluído.');
     carregarCrud(nomeAba);
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+/* =============================================================
+   DASHBOARD DE INSTRUTORES (Qualificados x Selecionados)
+   Reaproveita o modal genérico (CRUD_UI['Cad_Instrutor']) para
+   Cadastrar/Editar; "Selecionar Instrutor" é um fluxo dedicado que
+   respeita a regra de integridade do backend (instrutorHabilitado_).
+============================================================= */
+let INSTR_STATE = {
+  modo: 'geral',            // 'geral' | 'curso'
+  idCursoSelecionado: '',
+  qualificados: [],         // Cad_Instrutor completo
+  selecoes: [],              // Instrutor_Turma_Selecao Ativos (achatado por matéria)
+  vinculos: [],               // Instrutor_Materia (mesmo shape de CTX.vinculos)
+  cursos: []                  // Cad_Cursos
+};
+
+// CMG (mais antigo) -> 3SG (mais moderno). Valores fora da lista (civis "SC" etc.) caem no fallback 999.
+const ORDEM_POSTO_GRADUACAO = {
+  'CMG': 1, 'CF': 2, 'CC': 3, 'CT': 4, '1T': 5, '2T': 6,
+  'SO': 7, '1SG': 8, '2SG': 9, '3SG': 10
+};
+
+function pesoAntiguidadeInstrutor_(pg) {
+  const bruto = String(pg || '').toUpperCase();
+  const semParenteses = bruto.replace(/\([^)]*\)/g, '');           // remove "(RM2-T)" etc.
+  const normalizado = semParenteses.replace(/[°ºª]/g, '').replace(/[\s\-]/g, ''); // remove °/º/ª, espaços, hífens
+  const chaves = Object.keys(ORDEM_POSTO_GRADUACAO).sort((a, b) => b.length - a.length); // mais específica primeiro
+  for (const chave of chaves) {
+    if (normalizado.startsWith(chave)) return ORDEM_POSTO_GRADUACAO[chave];
+  }
+  return 999; // desconhecido (civis "SC" etc.) — fica no fim
+}
+
+function ordenarPorAntiguidade(instrutores) {
+  return [...instrutores].sort((a, b) => pesoAntiguidadeInstrutor_(a['P/G']) - pesoAntiguidadeInstrutor_(b['P/G']));
+}
+
+async function carregarDashboardInstrutores() {
+  try {
+    const [qualificados, materiasComSelecao, cursos] = await Promise.all([
+      gs('crudListar', 'Cad_Instrutor'),
+      gs('listarMateriasComSelecao'),
+      gs('crudListar', 'Cad_Cursos')
+    ]);
+
+    INSTR_STATE.qualificados = qualificados;
+    INSTR_STATE.cursos = cursos;
+    INSTR_STATE.vinculos = CTX.vinculos;
+    INSTR_STATE.selecoes = materiasComSelecao.flatMap(m =>
+      (m.instrutoresSelecionados || []).map(s => ({ ...s, idGrade: m.idGrade, idCurso: m.idCurso }))
+    );
+
+    CRUD_UI['Cad_Instrutor'].dados = qualificados; // mantém o modal genérico de Editar funcionando
+
+    renderFiltroGlobalInstrutores();
+    atualizarBotaoSelecionarInstrutor_();
+    carregarBlocosInstrutores_();
+  } catch (e) { toast(e.message, 'danger'); }
+}
+
+function carregarBlocosInstrutores_() {
+  const dados = montarDadosInstrutores_();
+  renderKPIsInstrutores(dados);
+  renderGraficosInstrutores(dados);
+  renderTabelaInstrutores(dados);
+}
+
+function montarDadosInstrutores_() {
+  let listaAtual = INSTR_STATE.qualificados;
+  let selecionadosDoCurso = [];
+
+  if (INSTR_STATE.modo === 'curso' && INSTR_STATE.idCursoSelecionado) {
+    const idsMateriasDoCurso = new Set(CTX.materias.filter(m => m.idCurso === INSTR_STATE.idCursoSelecionado).map(m => m.idGrade));
+    const idsInstrutoresSelecionados = new Set(
+      INSTR_STATE.selecoes.filter(s => idsMateriasDoCurso.has(s.idGrade)).map(s => s.idInstrutor)
+    );
+    selecionadosDoCurso = INSTR_STATE.qualificados.filter(i => idsInstrutoresSelecionados.has(String(i['ID_Instrutor'])));
+    listaAtual = selecionadosDoCurso;
+  }
+
+  return { listaAtual, qualificadosTotal: INSTR_STATE.qualificados.length, selecionadosDoCurso };
+}
+
+function renderFiltroGlobalInstrutores() {
+  const box = document.getElementById('instrFiltroGlobal');
+  const opcoesCursos = INSTR_STATE.cursos.map(c =>
+    `<option value="${esc(c['ID_Curso'])}" ${c['ID_Curso'] === INSTR_STATE.idCursoSelecionado ? 'selected' : ''}>${esc(c['Nome_Curso'] || c['ID_Curso'])}</option>`
+  ).join('');
+
+  box.innerHTML = `
+    <div class="d-flex flex-wrap align-items-center gap-2">
+      <div class="btn-group" role="group">
+        <button type="button" class="btn btn-sm ${INSTR_STATE.modo === 'geral' ? 'btn-primary' : 'btn-outline-primary'}" onclick="alternarModoInstrutores('geral')">Geral</button>
+        <button type="button" class="btn btn-sm ${INSTR_STATE.modo === 'curso' ? 'btn-primary' : 'btn-outline-primary'}" onclick="alternarModoInstrutores('curso')">Por Curso</button>
+      </div>
+      ${INSTR_STATE.modo === 'curso' ? `<select id="selCursoInstrutores" class="form-select form-select-sm" style="width:auto;min-width:260px" onchange="aoTrocarCursoInstrutores(this.value)">
+        <option value="">Selecione um curso…</option>${opcoesCursos}
+      </select>` : ''}
+    </div>`;
+}
+
+function alternarModoInstrutores(modo) {
+  INSTR_STATE.modo = modo;
+  if (modo === 'geral') INSTR_STATE.idCursoSelecionado = '';
+  renderFiltroGlobalInstrutores();
+  atualizarBotaoSelecionarInstrutor_();
+  carregarBlocosInstrutores_();
+}
+
+function aoTrocarCursoInstrutores(idCurso) {
+  INSTR_STATE.idCursoSelecionado = idCurso;
+  atualizarBotaoSelecionarInstrutor_();
+  carregarBlocosInstrutores_();
+}
+
+function atualizarBotaoSelecionarInstrutor_() {
+  const btn = document.getElementById('btnSelecionarInstrutor');
+  if (!btn) return;
+  // A classe .admin-only já esconde o botão uma vez na inicialização (perfis não-Admin);
+  // aqui checamos o perfil de novo porque este toggle roda depois disso, sempre que o
+  // modo/curso muda — sem isso, um Operador poderia "reaparecer" com o botão visível.
+  const podeVer = CTX.usuario.funcao === 'Admin' && INSTR_STATE.modo === 'curso' && !!INSTR_STATE.idCursoSelecionado;
+  btn.style.display = podeVer ? '' : 'none';
+}
+
+function renderKPIsInstrutores(dados) {
+  const box = document.getElementById('instrKPIs');
+  const totalSelecionados = INSTR_STATE.modo === 'curso'
+    ? dados.selecionadosDoCurso.length
+    : new Set(INSTR_STATE.selecoes.map(s => s.idInstrutor)).size;
+
+  const kpi = (titulo, valor) => `<div class="col-6 col-md-3">
+    <div class="card card-kpi text-center"><div class="card-body py-3">
+      <div class="fs-3">${valor}</div><small class="text-muted">${esc(titulo)}</small>
+    </div></div></div>`;
+
+  box.innerHTML =
+    kpi('Qualificados (total)', dados.qualificadosTotal) +
+    kpi(INSTR_STATE.modo === 'curso' ? 'Selecionados neste curso' : 'Selecionados (algum curso)', totalSelecionados);
+}
+
+let INSTR_CHARTS = {}; // canvasId -> instância Chart.js viva
+
+function destruirGraficoSeExistir_(id) {
+  if (INSTR_CHARTS[id]) { INSTR_CHARTS[id].destroy(); delete INSTR_CHARTS[id]; }
+}
+
+function contarPorCampo_(lista, campo) {
+  const contagem = {};
+  lista.forEach(i => {
+    const v = String(i[campo] || '').trim() || '—';
+    contagem[v] = (contagem[v] || 0) + 1;
+  });
+  return contagem;
+}
+
+function criarGraficoBarras_(canvasId, labels, valores, cor = '#1F4E78') {
+  destruirGraficoSeExistir_(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  INSTR_CHARTS[canvasId] = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ data: valores, backgroundColor: cor }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+}
+
+function renderGraficosInstrutores(dados) {
+  const lista = dados.listaAtual;
+  const box = document.getElementById('instrGraficos');
+  const campos = [
+    { campo: 'P/G', titulo: 'Posto/Graduação', canvas: 'graficoInstrPG' },
+    { campo: 'Categoria', titulo: 'Categoria', canvas: 'graficoInstrCategoria' },
+    { campo: 'OM', titulo: 'Organização Militar (OM)', canvas: 'graficoInstrOM' },
+    { campo: 'Regime de trabalho', titulo: 'Regime de Trabalho', canvas: 'graficoInstrRegime' },
+    { campo: 'Nível de escolaridade', titulo: 'Escolaridade', canvas: 'graficoInstrEscolaridade' },
+    { campo: 'Capacitação Didática', titulo: 'Capacitação Didática', canvas: 'graficoInstrCapacitacao' }
+  ];
+
+  box.innerHTML = campos.map(c => `
+    <div class="col-md-6 col-xl-4">
+      <div class="card h-100"><div class="card-body">
+        <h6 class="card-title">${esc(c.titulo)}</h6>
+        <div style="height:220px"><canvas id="${c.canvas}"></canvas></div>
+      </div></div>
+    </div>`).join('') + `
+    <div class="col-md-6 col-xl-4">
+      <div class="card h-100"><div class="card-body">
+        <h6 class="card-title">CH Ministrada no Ano (Top 10)</h6>
+        <div style="height:220px"><canvas id="graficoInstrCH"></canvas></div>
+      </div></div>
+    </div>`;
+
+  campos.forEach(c => {
+    const contagem = contarPorCampo_(lista, c.campo);
+    const labels = Object.keys(contagem);
+    criarGraficoBarras_(c.canvas, labels, labels.map(l => contagem[l]));
+  });
+
+  const top10 = [...lista]
+    .map(i => ({ nome: i['NOME'] || '—', ch: Number(i['Carga horária ministrada no ano']) || 0 }))
+    .sort((a, b) => b.ch - a.ch)
+    .slice(0, 10);
+  criarGraficoBarras_('graficoInstrCH', top10.map(t => t.nome), top10.map(t => t.ch), '#2e7d32');
+}
+
+function renderTabelaInstrutores(dados) {
+  const lista = ordenarPorAntiguidade(dados.listaAtual);
+  const podeEditar = CTX.usuario.funcao === 'Admin';
+  const tbl = document.getElementById('tblInstrutores');
+
+  if (!lista.length) {
+    tbl.innerHTML = '<tbody><tr><td class="text-muted">Nenhum instrutor encontrado.</td></tr></tbody>';
+    return;
+  }
+
+  const thead = `<thead class="table-light"><tr>
+      <th>P/G</th><th>Nome</th><th>Categoria</th><th>OM</th><th>Regime de trabalho</th>
+      ${podeEditar ? '<th class="text-end">Ações</th>' : ''}
+    </tr></thead>`;
+
+  const tbody = '<tbody>' + lista.map(i => {
+    const idInstrutor = String(i['ID_Instrutor']);
+    const acoes = podeEditar ? `<td class="text-end">
+        <button class="btn btn-sm btn-outline-primary" onclick="abrirModalCrud('Cad_Instrutor', '${esc(idInstrutor)}')">✎ Editar</button>
+      </td>` : '';
+    return `<tr>
+      <td>${esc(i['P/G'])}</td><td>${esc(i['NOME'])}</td><td>${esc(i['Categoria'])}</td>
+      <td>${esc(i['OM'])}</td><td>${esc(i['Regime de trabalho'])}</td>
+      ${acoes}
+    </tr>`;
+  }).join('') + '</tbody>';
+
+  tbl.innerHTML = thead + tbody;
+}
+
+/* ---- Selecionar Instrutor (modo 'curso') ---- */
+let modalSelecionarInstrutor = null;
+
+function abrirModalSelecionarInstrutor() {
+  if (!modalSelecionarInstrutor) modalSelecionarInstrutor = new bootstrap.Modal(document.getElementById('modalSelecionarInstrutor'));
+  const mats = CTX.materias.filter(m => m.idCurso === INSTR_STATE.idCursoSelecionado);
+  document.getElementById('selMateriaSelecao').innerHTML = '<option value="">Selecione…</option>' +
+    mats.map(m => `<option value="${esc(m.idGrade)}">${esc(m.nome)}</option>`).join('');
+  document.getElementById('selInstrutorSelecao').innerHTML = '<option value="">Selecione a matéria primeiro…</option>';
+  modalSelecionarInstrutor.show();
+}
+
+async function confirmarSelecaoInstrutor() {
+  const idGrade = document.getElementById('selMateriaSelecao').value;
+  const idInstrutor = document.getElementById('selInstrutorSelecao').value;
+  if (!idGrade || !idInstrutor) return toast('Selecione a matéria e o instrutor.', 'warning');
+  try {
+    await gs('criarSelecaoInstrutor', idInstrutor, idGrade);
+    toast('Instrutor selecionado com sucesso!');
+    modalSelecionarInstrutor.hide();
+    carregarDashboardInstrutores();
   } catch (e) { toast(e.message, 'danger'); }
 }
 </script>
