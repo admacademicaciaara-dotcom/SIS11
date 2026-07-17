@@ -21,9 +21,6 @@
     }
     .print-header { text-align: center; margin-bottom: 12px; }
     .print-header h6 { margin: 0; font-weight: 700; }
-    .dsa-grid th, .dsa-grid td.dsa-cel { min-width: 105px; }
-    .dsa-grid td.dsa-cel { font-size: .78rem; line-height: 1.2; vertical-align: middle; }
-    .dsa-grid td.dsa-cel:hover { outline: 2px solid #1F4E78; outline-offset: -2px; }
   </style>
 </head>
 <body>
@@ -56,7 +53,7 @@
 <div class="container-fluid mt-3">
   <ul class="nav nav-tabs no-print" id="abas">
     <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabDash">📊 Dashboard</button></li>
-    <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabDSA">🗓️ Detalhe Semanal (DSA)</button></li>
+    <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabReg">📝 Registrar Aula</button></li>
     <li class="nav-item escrita"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabAva">🗓️ Avaliações</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRel">🖨️ Relatório</button></li>
     <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCursos">🎓 Cursos</button></li>
@@ -72,31 +69,20 @@
       <div id="dashTurma" style="display:none"></div>
     </div>
 
-    <!-- ============ DETALHE SEMANAL DE AULA (DSA) ============ -->
-    <div class="tab-pane fade" id="tabDSA">
-      <div class="alert alert-info py-2" id="avisoTurmaDSA" style="display:none">Selecione uma turma no menu superior para ver o Detalhe Semanal de Aula.</div>
-      <div id="blocoDSA" style="display:none">
-        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-          <div>
-            <h5 class="mb-0" id="dsaTituloSemana">Semana —</h5>
-            <small class="text-muted" id="dsaSubtituloSemana"></small>
-          </div>
-          <div class="d-flex align-items-center gap-2">
-            <select id="dsaSelSemana" class="form-select form-select-sm" style="min-width:220px" onchange="aoTrocarSemanaDSA()"></select>
-            <span class="badge" id="dsaBadgeStatus">—</span>
-          </div>
-        </div>
-
-        <div class="d-flex flex-wrap gap-2 mb-3">
-          <button class="btn btn-outline-primary btn-sm" onclick="gerarPreviaSemanaDSA()">🪄 Gerar Prévia</button>
-          <button class="btn btn-primary btn-sm" onclick="salvarSemanaDSA()">💾 Salvar Semana</button>
-          <button class="btn btn-outline-secondary btn-sm" onclick="mostrarHistoricoDSA()">🕘 Histórico de alterações</button>
-          <button class="btn btn-outline-secondary btn-sm admin-only" onclick="configurarEstruturaDSA()">⚙️ Configurar estrutura</button>
-        </div>
-
-        <div id="dsaAvisoConfig" class="alert alert-warning py-2" style="display:none"></div>
-        <div id="dsaGrid" class="table-responsive"></div>
-        <div id="dsaHistorico" class="mt-3" style="display:none"></div>
+    <!-- ============ REGISTRAR AULA ============ -->
+    <div class="tab-pane fade" id="tabReg">
+      <div class="alert alert-info py-2" id="avisoTurmaReg" style="display:none">Selecione uma turma no menu superior para registrar.</div>
+      <div class="row g-3" id="formReg">
+        <div class="col-md-2"><label class="form-label">Data*</label><input type="date" id="regData" class="form-control"></div>
+        <div class="col-md-4"><label class="form-label">Matéria*</label><select id="regMateria" class="form-select" onchange="filtrarInstrutores()"></select></div>
+        <div class="col-md-6"><label class="form-label">Instrutor*</label><select id="regInstrutor" class="form-select"></select></div>
+        <div class="col-md-3"><label class="form-label">Tipo de Atividade*</label><select id="regTipo" class="form-select" onchange="aoTrocarTipo()"></select></div>
+        <div class="col-md-3"><label class="form-label">Metodologia*</label><select id="regMet" class="form-select"></select></div>
+        <div class="col-md-2"><label class="form-label">Tempos*</label><input type="number" id="regTempos" class="form-control" min="1" value="1"></div>
+        <div class="col-md-4"><label class="form-label">Saldo da matéria</label><input id="regSaldo" class="form-control" disabled placeholder="—"></div>
+        <div class="col-md-8"><label class="form-label">Conteúdo / Resumo</label><input id="regConteudo" class="form-control" placeholder="Ex: Introdução a marés — teoria e exercícios"></div>
+        <div class="col-md-4"><label class="form-label">Observações</label><input id="regObs" class="form-control"></div>
+        <div class="col-12"><button class="btn btn-primary" onclick="salvarRegistro()">Salvar registro</button></div>
       </div>
     </div>
 
@@ -179,61 +165,6 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
         <button type="button" class="btn btn-primary" onclick="salvarCrud()">Salvar</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- MODAL DE EDIÇÃO DE UM TEMPO DE AULA (DSA) -->
-<div class="modal fade" id="modalTempoDSA" tabindex="-1">
-  <div class="modal-dialog">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="modalTempoDSATitulo">Editar tempo de aula</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="row g-3">
-          <div class="col-12">
-            <label class="form-label">O que vai neste tempo?</label>
-            <select id="dsaTipoConteudo" class="form-select" onchange="aoTrocarTipoConteudoDSA()">
-              <option value="Materia">Matéria</option>
-              <option value="Evento">Evento (avaliação, licença, extraclasse, feriado...)</option>
-            </select>
-          </div>
-          <div class="col-12" id="dsaBlocoMateria">
-            <label class="form-label">Matéria</label>
-            <select id="dsaCampoMateria" class="form-select" onchange="aoTrocarMateriaDSA()"></select>
-          </div>
-          <div class="col-12" id="dsaBlocoEvento" style="display:none">
-            <label class="form-label">Tipo de evento</label>
-            <select id="dsaCampoEvento" class="form-select" onchange="aoTrocarEventoDSA()"></select>
-          </div>
-          <div class="col-6">
-            <label class="form-label">Instrutor</label>
-            <select id="dsaCampoInstrutor" class="form-select"></select>
-          </div>
-          <div class="col-6">
-            <label class="form-label">T/E</label>
-            <select id="dsaCampoTE" class="form-select">
-              <option value="EO">EO — Exposição Oral</option>
-              <option value="AP">AP — Aplicação Prática</option>
-              <option value="EI">EI — Estudo Individual</option>
-              <option value="PM">PM — Avaliação da Aprendizagem</option>
-              <option value="VP">VP — Vista de Prova</option>
-              <option value="TI">TI — Trabalho Individual</option>
-              <option value="PO">PO — Prática Orientada</option>
-            </select>
-          </div>
-          <div class="col-6"><label class="form-label">Local</label><input id="dsaCampoLocal" class="form-control" placeholder="Ex: Sala 01"></div>
-          <div class="col-12"><label class="form-label">Tópico / Unidade de Ensino</label><input id="dsaCampoDescricao" class="form-control" placeholder="Ex: 1 – Introdução ao tema"></div>
-          <div class="col-12"><label class="form-label">Observações</label><input id="dsaCampoObs" class="form-control"></div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline-danger me-auto" onclick="limparTempoDSA()">Limpar este tempo</button>
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-        <button type="button" class="btn btn-primary" onclick="aplicarTempoDSA()">Aplicar</button>
       </div>
     </div>
   </div>
@@ -357,7 +288,10 @@ async function inicializarApp() {
     });
 
     // Listas fixas
+    preencherSelect('regTipo', CTX.tiposAtividade);
+    preencherSelect('regMet', CTX.metodologias);
     preencherSelect('avaTipo', CTX.tiposAvaliacao);
+    document.getElementById('regData').value = CTX.hoje;
     document.getElementById('avaData').value = CTX.hoje;
 
     // Período padrão do relatório: semana corrente (seg→dom)
@@ -389,8 +323,8 @@ async function aoTrocarTurma() {
   turmaSel = document.getElementById('selTurma').value;
   const temTurma = !!turmaSel;
 
-  document.getElementById('avisoTurmaDSA').style.display = temTurma ? 'none' : '';
-  document.getElementById('blocoDSA').style.display = temTurma ? '' : 'none';
+  document.getElementById('avisoTurmaReg').style.display = temTurma ? 'none' : '';
+  document.getElementById('formReg').style.display = temTurma ? '' : 'none';
   document.getElementById('avisoTurmaAva').style.display = temTurma ? 'none' : '';
   document.getElementById('blocoAva').style.display = temTurma ? '' : 'none';
 
@@ -399,19 +333,24 @@ async function aoTrocarTurma() {
     const turma = CTX.turmas.find(t => t.idTurma === turmaSel);
     const mats = CTX.materias.filter(m => m.idCurso === turma.idCurso);
     const opts = mats.map(m => `<option value="${esc(m.idGrade)}">${esc(m.nome)} (${m.cargaHoraria}t)</option>`).join('');
+    document.getElementById('regMateria').innerHTML = '<option value="">Selecione…</option>' + opts;
     document.getElementById('avaMateria').innerHTML = '<option value="">Selecione…</option>' + opts;
+    filtrarInstrutores();
     preencherInstrutores('avaInstrutor', null);
     carregarDashboardTurma();
     carregarAvaliacoes();
-    carregarEstruturaDSA();
   } else {
     carregarDashboardGeral();
   }
 }
 
-/* Instrutores: prioriza habilitados (Instrutor_Materia) para a matéria escolhida.
-   Filtro ESTRITO (só habilitados), Contexto V1 regra 1. Sem matéria selecionada
-   (ex.: tipos sem matéria/eventos), mostra todos — nada a filtrar ainda. */
+/* Instrutores: prioriza habilitados (Instrutor_Materia) para a matéria escolhida */
+function filtrarInstrutores() {
+  preencherInstrutores('regInstrutor', document.getElementById('regMateria').value);
+  atualizarSaldoMateria();
+}
+/* ALTERADO: filtro agora é ESTRITO (só habilitados), Contexto V1 regra 1.
+   Sem matéria selecionada (ex.: tipos sem matéria), mostra todos — nada a filtrar ainda. */
 function preencherInstrutores(selectId, idGrade) {
   const s = document.getElementById(selectId);
   const todos = CTX.instrutores;
@@ -425,6 +364,24 @@ function preencherInstrutores(selectId, idGrade) {
   s.innerHTML = habilitados.length
     ? '<option value="">Selecione…</option>' + habilitados.map(i => `<option value="${i.id}">${esc(i.pg)} ${esc(i.nome)}</option>`).join('')
     : '<option value="">⚠️ Nenhum instrutor habilitado nesta matéria</option>';
+}
+async function atualizarSaldoMateria() {
+  const idGrade = document.getElementById('regMateria').value;
+  const campo = document.getElementById('regSaldo');
+  campo.value = '';
+  if (!idGrade || !turmaSel) return;
+  // Saldo local (rápido): prevista da matéria − consumido virá do dashboard já carregado
+  const m = CTX.materias.find(x => x.idGrade === idGrade);
+  if (m && window._dashTurma) {
+    const linha = window._dashTurma.materias.find(l => l.idGrade === idGrade);
+    if (linha) campo.value = `${linha.consumida} de ${linha.prevista} tempos usados · saldo ${linha.saldo}`;
+  }
+}
+function aoTrocarTipo() {
+  const tipo = document.getElementById('regTipo').value;
+  const semMateria = CTX.tiposSemMateria.includes(tipo);
+  document.getElementById('regMateria').disabled = semMateria;
+  if (semMateria) document.getElementById('regMateria').value = '';
 }
 
 /* =============================================================
@@ -499,308 +456,28 @@ async function carregarDashboardTurma() {
 }
 
 /* =============================================================
-   DETALHE SEMANAL DE AULA (DSA)
-   Substitui a antiga tela de "Registrar Aula" por um preenchimento
-   semanal, com prévia automática e versionamento (Alteração N).
-   Backend: getEstruturaSemanas / getDSASemana / gerarPreviaDSA / salvarDSA.
+   REGISTRAR AULA
 ============================================================= */
-let modalTempoDSA = null;
-let dsaEdicaoAtual = null; // { dia, tempoNum }
-
-async function carregarEstruturaDSA() {
+async function salvarRegistro() {
   try {
-    window._dsaEstrutura = await gs('getEstruturaSemanas', turmaSel);
-    const sel = document.getElementById('dsaSelSemana');
-    sel.innerHTML = window._dsaEstrutura.semanas.map(s =>
-      `<option value="${s.numero}">Semana ${s.numero} (${fmtBR(s.dataInicio)} a ${fmtBR(s.dataFim)}) — ${esc(s.status)}</option>`
-    ).join('');
-    sel.value = window._dsaEstrutura.semanaAtual;
-    document.getElementById('dsaAvisoConfig').style.display = 'none';
-    await carregarSemanaDSA(window._dsaEstrutura.semanaAtual);
-  } catch (e) {
-    if (String(e.message).includes('Estrutura do DSA ainda não configurada')) {
-      document.getElementById('dsaGrid').innerHTML = '';
-      document.getElementById('dsaTituloSemana').textContent = 'DSA — estrutura não configurada';
-      document.getElementById('dsaSubtituloSemana').textContent = '';
-      const aviso = document.getElementById('dsaAvisoConfig');
-      aviso.style.display = '';
-      aviso.textContent = e.message;
-    } else {
-      toast(e.message, 'danger');
-    }
-  }
-}
-
-async function carregarSemanaDSA(numeroSemana) {
-  try {
-    const d = await gs('getDSASemana', turmaSel, numeroSemana);
-    window._dsaDados = d;
-
-    // Monta os dias ISO da semana (segunda -> sexta/sábado, conforme regime)
-    const dias = [];
-    let cursor = new Date(d.semana.dataInicio + 'T00:00:00');
-    const fim = new Date(d.semana.dataFim + 'T00:00:00');
-    const nomes = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-    while (cursor <= fim) {
-      const iso = cursor.toISOString().slice(0, 10);
-      dias.push({ iso, label: nomes[cursor.getDay()], curto: fmtBR(iso) });
-      cursor.setDate(cursor.getDate() + 1);
-    }
-    d.semana.diasISO = dias;
-
-    // Estado local editável: mapa[dia][tempoNum] = { tipoRegistro, idGrade, idTipoEvento, ... }
-    const estado = {};
-    dias.forEach(dd => estado[dd.iso] = {});
-    d.tempos.forEach(t => {
-      if (!estado[t.Data]) estado[t.Data] = {};
-      estado[t.Data][Number(t.Tempo_Num)] = {
-        tipoRegistro: t.Tipo_Registro, idGrade: t.ID_Grade, idTipoEvento: t.ID_TipoEvento,
-        idInstrutor: t.ID_Instrutor, local: t.Local, te: t.TE, descricaoUE: t.Descricao_UE, observacoes: t.Observacoes
-      };
-    });
-    window._dsaEstado = estado;
-
-    document.getElementById('dsaTituloSemana').textContent = `Semana ${d.semana.numero}`;
-    document.getElementById('dsaSubtituloSemana').textContent =
-      `${fmtBR(d.semana.dataInicio)} a ${fmtBR(d.semana.dataFim)} · Regime: ${esc(d.turma.regime || '—')} · ${d.temposPorDia} tempos/dia`;
-    const badge = document.getElementById('dsaBadgeStatus');
-    badge.textContent = d.semana.status;
-    badge.className = 'badge ' + ({ 'Oficial': 'bg-success', 'Prévia': 'bg-warning text-dark', 'Não iniciada': 'bg-secondary' }[d.semana.status] || 'bg-secondary');
-
-    document.getElementById('dsaHistorico').style.display = 'none';
-    renderizarGridDSA();
-  } catch (e) { toast(e.message, 'danger'); }
-}
-
-async function aoTrocarSemanaDSA() {
-  const num = Number(document.getElementById('dsaSelSemana').value);
-  await carregarSemanaDSA(num);
-}
-
-function chaveConteudoDSA_(t) {
-  if (!t || (!t.idGrade && !t.idTipoEvento)) return '';
-  return t.tipoRegistro === 'Materia' ? ('M:' + t.idGrade) : ('E:' + t.idTipoEvento);
-}
-
-function renderizarGridDSA() {
-  const d = window._dsaDados;
-  const dias = d.semana.diasISO;
-  const horarios = d.horarios.slice(0, d.temposPorDia);
-  const mapa = window._dsaEstado;
-
-  // Calcula agrupamento visual: tempos consecutivos do mesmo dia com o mesmo
-  // conteúdo (mesma matéria/evento) viram uma única célula (rowspan).
-  const spanInfo = {};
-  dias.forEach(dd => {
-    spanInfo[dd.iso] = {};
-    let i = 0;
-    while (i < horarios.length) {
-      const atual = (mapa[dd.iso] || {})[horarios[i].tempo];
-      const chaveAtual = chaveConteudoDSA_(atual);
-      let span = 1;
-      while (chaveAtual && i + span < horarios.length) {
-        const prox = (mapa[dd.iso] || {})[horarios[i + span].tempo];
-        if (chaveConteudoDSA_(prox) !== chaveAtual) break;
-        span++;
-      }
-      spanInfo[dd.iso][horarios[i].tempo] = span;
-      for (let k = 1; k < span; k++) spanInfo[dd.iso][horarios[i + k].tempo] = 0; // absorvido
-      i += span;
-    }
-  });
-
-  let html = '<table class="table table-bordered table-sm dsa-grid align-middle text-center"><thead><tr><th style="width:100px">Horário</th>';
-  dias.forEach(dd => html += `<th>${esc(dd.label)}<br><small class="text-muted">${esc(dd.curto)}</small></th>`);
-  html += '</tr></thead><tbody>';
-
-  let periodoAtual = null;
-  horarios.forEach(h => {
-    if (h.periodo !== periodoAtual) {
-      periodoAtual = h.periodo;
-      html += `<tr class="table-secondary"><td colspan="${dias.length + 1}" class="text-start fw-bold">${esc(periodoAtual)}</td></tr>`;
-    }
-    html += `<tr><td>${h.tempo}º<br><small>${h.inicio}-${h.fim}</small></td>`;
-    dias.forEach(dd => {
-      const span = spanInfo[dd.iso][h.tempo];
-      if (span === 0) return; // absorvida pela célula agrupada anterior
-      const t = (mapa[dd.iso] || {})[h.tempo];
-      html += celulaDSA_(dd.iso, h.tempo, t, span);
-    });
-    html += '</tr>';
-  });
-
-  html += '</tbody></table>';
-  document.getElementById('dsaGrid').innerHTML = html;
-}
-
-function celulaDSA_(diaISO, tempoNum, t, span) {
-  const vazio = !t || (!t.idGrade && !t.idTipoEvento);
-  const rotulo = vazio ? '<span class="text-muted">—</span>' : rotuloTempoDSA_(t);
-  const cor = corTempoDSA_(t);
-  return `<td class="dsa-cel cursor-pointer ${cor}" rowspan="${span}" onclick="abrirEdicaoTempoDSA('${diaISO}', ${tempoNum})">${rotulo}</td>`;
-}
-
-function rotuloTempoDSA_(t) {
-  if (t.tipoRegistro === 'Materia') {
-    const m = CTX.materias.find(x => x.idGrade === t.idGrade);
-    const instr = CTX.instrutores.find(i => i.id === String(t.idInstrutor));
-    return `<b>${esc(m ? (m.cod || m.nome) : t.idGrade)}</b>${instr ? '<br><small>' + esc(instr.pg) + ' ' + esc(instr.nome) + '</small>' : ''}`;
-  }
-  const ev = (CTX.tiposEvento || []).find(e => e.codigo === t.idTipoEvento);
-  return `<b>${esc(ev ? ev.codigo : t.idTipoEvento)}</b><br><small>${esc(ev ? ev.nome : '')}</small>`;
-}
-
-function corTempoDSA_(t) {
-  if (!t || (!t.idGrade && !t.idTipoEvento)) return '';
-  if (t.tipoRegistro === 'Materia') return 'table-primary';
-  const ev = (CTX.tiposEvento || []).find(e => e.codigo === t.idTipoEvento) || {};
-  return { 'Avaliação': 'table-warning', 'Licença Administrativa': 'table-secondary', 'Evento Extra': 'table-info', 'Atividade Extracurricular': 'table-info' }[ev.categoria] || 'table-light';
-}
-
-function nomeDiaCurtoDSA_(iso) {
-  const dia = (window._dsaDados.semana.diasISO || []).find(dd => dd.iso === iso);
-  return dia ? `${dia.label} (${dia.curto})` : iso;
-}
-
-function abrirEdicaoTempoDSA(diaISO, tempoNum) {
-  if (!modalTempoDSA) modalTempoDSA = new bootstrap.Modal(document.getElementById('modalTempoDSA'));
-  dsaEdicaoAtual = { dia: diaISO, tempoNum: Number(tempoNum) };
-
-  const turma = CTX.turmas.find(t => t.idTurma === turmaSel);
-  const mats = CTX.materias.filter(m => m.idCurso === turma.idCurso);
-  document.getElementById('dsaCampoMateria').innerHTML = '<option value="">Selecione…</option>' +
-    mats.map(m => `<option value="${esc(m.idGrade)}">${esc(m.nome)}</option>`).join('');
-  document.getElementById('dsaCampoEvento').innerHTML = '<option value="">Selecione…</option>' +
-    (CTX.tiposEvento || []).map(e => `<option value="${esc(e.codigo)}">${esc(e.codigo)} — ${esc(e.nome)}</option>`).join('');
-  preencherInstrutores('dsaCampoInstrutor', null);
-
-  const atual = (window._dsaEstado[diaISO] || {})[tempoNum];
-  const tipo = atual ? atual.tipoRegistro : 'Materia';
-  document.getElementById('dsaTipoConteudo').value = tipo;
-  aoTrocarTipoConteudoDSA();
-
-  if (atual) {
-    if (tipo === 'Materia') {
-      document.getElementById('dsaCampoMateria').value = atual.idGrade || '';
-      aoTrocarMateriaDSA();
-    } else {
-      document.getElementById('dsaCampoEvento').value = atual.idTipoEvento || '';
-      aoTrocarEventoDSA();
-    }
-    document.getElementById('dsaCampoInstrutor').value = atual.idInstrutor || '';
-    document.getElementById('dsaCampoTE').value = atual.te || 'EO';
-    document.getElementById('dsaCampoLocal').value = atual.local || '';
-    document.getElementById('dsaCampoDescricao').value = atual.descricaoUE || '';
-    document.getElementById('dsaCampoObs').value = atual.observacoes || '';
-  } else {
-    document.getElementById('dsaCampoLocal').value = '';
-    document.getElementById('dsaCampoDescricao').value = '';
-    document.getElementById('dsaCampoObs').value = '';
-  }
-
-  document.getElementById('modalTempoDSATitulo').textContent = `${nomeDiaCurtoDSA_(diaISO)} · ${tempoNum}º tempo`;
-  modalTempoDSA.show();
-}
-
-function aoTrocarTipoConteudoDSA() {
-  const tipo = document.getElementById('dsaTipoConteudo').value;
-  document.getElementById('dsaBlocoMateria').style.display = tipo === 'Materia' ? '' : 'none';
-  document.getElementById('dsaBlocoEvento').style.display = tipo === 'Evento' ? '' : 'none';
-}
-
-function aoTrocarMateriaDSA() {
-  const idGrade = document.getElementById('dsaCampoMateria').value;
-  preencherInstrutores('dsaCampoInstrutor', idGrade || null);
-  document.getElementById('dsaCampoTE').value = 'EO';
-}
-
-function aoTrocarEventoDSA() {
-  const cod = document.getElementById('dsaCampoEvento').value;
-  const ev = (CTX.tiposEvento || []).find(e => e.codigo === cod);
-  preencherInstrutores('dsaCampoInstrutor', null);
-  if (!ev) return;
-  document.getElementById('dsaCampoTE').value = ev.codigo === 'EI' ? 'EI' : (ev.categoria === 'Avaliação' ? 'PM' : 'EO');
-}
-
-function aplicarTempoDSA() {
-  const tipo = document.getElementById('dsaTipoConteudo').value;
-  const idGrade = tipo === 'Materia' ? document.getElementById('dsaCampoMateria').value : '';
-  const idTipoEvento = tipo === 'Evento' ? document.getElementById('dsaCampoEvento').value : '';
-  if (tipo === 'Materia' && !idGrade) return toast('Selecione a matéria.', 'warning');
-  if (tipo === 'Evento' && !idTipoEvento) return toast('Selecione o tipo de evento.', 'warning');
-
-  const { dia, tempoNum } = dsaEdicaoAtual;
-  if (!window._dsaEstado[dia]) window._dsaEstado[dia] = {};
-  window._dsaEstado[dia][tempoNum] = {
-    tipoRegistro: tipo, idGrade, idTipoEvento,
-    idInstrutor: document.getElementById('dsaCampoInstrutor').value,
-    local: document.getElementById('dsaCampoLocal').value,
-    te: document.getElementById('dsaCampoTE').value,
-    descricaoUE: document.getElementById('dsaCampoDescricao').value,
-    observacoes: document.getElementById('dsaCampoObs').value
-  };
-  modalTempoDSA.hide();
-  renderizarGridDSA();
-}
-
-function limparTempoDSA() {
-  const { dia, tempoNum } = dsaEdicaoAtual;
-  if (window._dsaEstado[dia]) delete window._dsaEstado[dia][tempoNum];
-  modalTempoDSA.hide();
-  renderizarGridDSA();
-}
-
-async function gerarPreviaSemanaDSA() {
-  if (!window._dsaDados) return;
-  if (!confirm(`Gerar prévia automática para a Semana ${window._dsaDados.semana.numero}? Isso substitui o preenchimento atual desta semana (ainda não salva como Oficial).`)) return;
-  try {
-    await gs('gerarPreviaDSA', turmaSel, window._dsaDados.semana.numero);
-    toast('Prévia gerada!');
-    await carregarEstruturaDSA();
-  } catch (e) { toast(e.message, 'danger'); }
-}
-
-async function salvarSemanaDSA() {
-  if (!window._dsaDados) return;
-  const tempos = [];
-  Object.keys(window._dsaEstado).forEach(dia => {
-    Object.keys(window._dsaEstado[dia]).forEach(tempoNum => {
-      const t = window._dsaEstado[dia][tempoNum];
-      if (!t || (!t.idGrade && !t.idTipoEvento)) return;
-      const h = window._dsaDados.horarios.find(x => x.tempo === Number(tempoNum));
-      tempos.push({
-        data: dia, tempoNum: Number(tempoNum), periodo: h ? h.periodo : '', horaInicio: h ? h.inicio : '', horaFim: h ? h.fim : '',
-        tipoRegistro: t.tipoRegistro, idGrade: t.idGrade || '', idTipoEvento: t.idTipoEvento || '',
-        idInstrutor: t.idInstrutor || '', local: t.local || '', te: t.te || '', descricaoUE: t.descricaoUE || '', observacoes: t.observacoes || ''
-      });
-    });
-  });
-  try {
-    const r = await gs('salvarDSA', { idTurma: turmaSel, numeroSemana: window._dsaDados.semana.numero, tempos });
-    toast(`Semana salva como ${r.status} (Alteração ${r.versao}).`);
-    await carregarEstruturaDSA();
-  } catch (e) { toast(e.message, 'danger'); }
-}
-
-function mostrarHistoricoDSA() {
-  const box = document.getElementById('dsaHistorico');
-  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-  const h = (window._dsaDados && window._dsaDados.historico) || [];
-  box.style.display = '';
-  box.innerHTML = h.length === 0
-    ? '<p class="text-muted">Nenhuma alteração salva ainda para esta semana.</p>'
-    : `<table class="table table-sm table-striped">
-        <thead class="table-light"><tr><th>Alteração</th><th>Tipo</th><th>Por</th><th>Quando</th><th>Obs.</th></tr></thead>
-        <tbody>${h.map(a => `<tr><td>${a.numero}</td><td>${esc(a.tipo)}</td><td>${esc(a.por)}</td><td>${esc(a.em)}</td><td>${esc(a.obs)}</td></tr>`).join('')}</tbody>
-      </table>`;
-}
-
-async function configurarEstruturaDSA() {
-  try {
-    const r = await gs('configurarSistemaDSA');
-    toast(r.mensagem);
-    CTX = await gs('getContextoInicial'); // recarrega tiposEvento recém-criados
-    await carregarEstruturaDSA();
+    const p = {
+      idTurma: turmaSel,
+      data: document.getElementById('regData').value,
+      idGrade: document.getElementById('regMateria').value,
+      idInstrutor: document.getElementById('regInstrutor').value,
+      tipoAtividade: document.getElementById('regTipo').value,
+      metodologia: document.getElementById('regMet').value,
+      tempos: document.getElementById('regTempos').value,
+      conteudo: document.getElementById('regConteudo').value,
+      observacoes: document.getElementById('regObs').value
+    };
+    const r = await gs('registrarAula', p);
+    let msg = `Registro ${r.id} salvo!`;
+    if (r.saldo) msg += ` Saldo da matéria: ${r.saldo.saldo} tempos.`;
+    toast(msg);
+    document.getElementById('regConteudo').value = '';
+    document.getElementById('regObs').value = '';
+    carregarDashboardTurma(); // atualiza saldos
   } catch (e) { toast(e.message, 'danger'); }
 }
 
